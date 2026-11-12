@@ -735,7 +735,7 @@ function reportCard() {
     <h2><span class="em">📋</span>Resumen de ${monthName(r.key)}${r.live ? ' (hasta hoy)' : ''}</h2>
     <div class="delta-big num ${up ? 'up' : 'down'}">${up ? '+' : ''}${eur(r.delta)}</div>
     <p class="small muted" style="margin:2px 0 6px">Has ahorrado unos <b>${eur(r.saved)}</b> y el mercado te ha dado <b>${r.market >= 0 ? '+' : ''}${eur(r.market)}</b>.</p>
-    ${r.pay.count ? `<p class="small" style="margin:0 0 10px">💳 Has gastado unos <b class="${r.spent > r.planned * 1.1 ? 'down' : ''}">${eur(Math.max(0, r.spent))}</b> <span class="muted">(tu plan: ${eur(r.planned)})</span></p>` : ''}
+    ${r.pay.count ? `<p class="small" style="margin:0 0 10px">💳 De tu sueldo has gastado unos <b class="${r.spent > r.planned * 1.1 ? 'down' : ''}">${eur(Math.max(0, r.spent))}</b> <span class="muted">(tu plan: ${eur(r.planned)})</span></p>` : ''}
     <button class="btn ghost block" data-action="report" data-v="${r.key}">Ver el resumen completo</button>
   </section>`;
 }
@@ -780,7 +780,7 @@ function spendBlock(r, keys) {
   const max = Math.max(sp, pl, 1);
   const hist = keys.map(k => buildReport(k)).filter(x => x && x.pay.count && x.spent >= 0).slice(-6);
   const hmax = Math.max(1, ...hist.map(x => x.spent), pl);
-  return `<h3 style="margin:16px 0 4px">💳 Lo que has gastado (aprox.)</h3>
+  return `<h3 style="margin:16px 0 4px">💳 Lo que has gastado de tu sueldo (aprox.)</h3>
     ${weird ? `<div class="alert warn"><span class="ic">🤔</span><div class="bd">Sale un gasto negativo: ha entrado dinero que la app no conoce (un regalo, un Bizum, una devolución…) o falta alguna cuenta. Apúntalo en Extras si es un ingreso.</div></div>` : `
     <div class="delta-big num ${diff > pl * 0.1 ? 'down' : 'up'}">${eur(sp)}</div>
     <p style="margin:2px 0 8px">${Math.abs(diff) < Math.max(30, pl * 0.1) ? 'Justo lo que tenías previsto. 👌' : diff > 0 ? `Te has pasado <b class="down">${eur(diff)}</b> de lo previsto (${eur(pl)}).` : `Has gastado <b class="up">${eur(-diff)} menos</b> de lo previsto (${eur(pl)}). 🎉`}</p>
@@ -788,7 +788,8 @@ function spendBlock(r, keys) {
       <div class="row"><span>Real</span><span style="flex:1;margin:0 10px;height:10px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${sp / max * 100}%;background:var(--b-gastos)"></i></span><b class="num">${eur(sp)}</b></div>
       <div class="row"><span>Plan</span><span style="flex:1;margin:0 10px;height:10px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${pl / max * 100}%;background:var(--b-operativo)"></i></span><b class="num">${eur(pl)}</b></div>
     </div>`}
-    <p class="help" style="margin-top:8px">Cómo se calcula: has cobrado <b>${eur(r.pay.total)}</b>${r.pay.count > 1 ? ` (${r.pay.count} nóminas)` : ''}${r.extraInc ? ` + ${eur(r.extraInc)} de ingresos extra` : ''} y tu dinero ha crecido <b>${eur(r.saved)}</b> por ahorro propio. La diferencia es lo que ha salido: <b>${eur(sp)}</b>.</p>
+    <p class="help" style="margin-top:8px">Cómo se calcula: has cobrado <b>${eur(r.pay.total)}</b>${r.pay.count > 1 ? ` (${r.pay.count} nóminas)` : ''}${r.extraInc ? ` + ${eur(r.extraInc)} de ingresos extra` : ''} y has guardado <b>${eur(r.saved)}</b> de ese dinero. Lo que falta es lo que has gastado de tu sueldo: <b>${eur(sp)}</b>.</p>
+    <p class="help">Lo que suben o bajan tus fondos${Math.abs(r.market) >= 1 ? ` (este mes ${r.market >= 0 ? '+' : ''}${eur(r.market)})` : ''} y los intereses no cuentan: ni como ahorro ni como gasto.</p>
     ${hist.length > 1 ? `<h3 style="margin:12px 0 4px">Últimos meses</h3>${hist.map(x => `<div class="row small" style="padding:4px 0"><span style="width:76px;text-transform:capitalize">${MONTHS[+x.key.slice(5) - 1].slice(0, 3)} ${x.key.slice(2, 4)}</span><span style="flex:1;margin:0 10px;height:10px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${x.spent / hmax * 100}%;background:${x.spent > pl * 1.1 ? 'var(--bad)' : 'var(--b-gastos)'}"></i></span><b class="num">${eur(x.spent)}</b></div>`).join('')}` : ''}`;
 }
 function greeting() {
