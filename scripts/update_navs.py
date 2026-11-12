@@ -2,12 +2,13 @@
 """Actualiza navs.json con el valor liquidativo diario de los fondos de funds.json.
 
 Fuentes, por orden:
-  1. Morningstar (histórico completo, el primer día rellena varios años).
-  2. Financial Times (solo el último precio), por si Morningstar falla.
+  1. Financial Times: último precio y, la primera vez, varios años de histórico.
+  2. Morningstar, por si FT falla.
 
 Si una fuente falla se prueba la siguiente; si todas fallan para un fondo,
 se conserva lo que ya había. Solo usa la biblioteca estándar de Python.
 """
+import html
 import json
 import re
 import sys
@@ -60,19 +61,49 @@ def morningstar_history(isin, currency, start):
 
 
 # ---------- Financial Times ----------
-def ft_latest(isin, currency):
+def ft_history(xid, start, end):
+    rows = []
+    s = start
+    while s <= end:
+        e = min(end, s + timedelta(days=364))
+        url = ("https://markets.ft.com/data/equities/ajax/get-historical-prices"
+               f"?startDate={s:%Y/%m/%d}&endDate={e:%Y/%m/%d}&symbol={xid}")
+        body = json.loads(get(url)).get("html", "")
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S):
+            tds = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+            if len(tds) < 5:
+                continue
+            dm = re.search(r"[A-Z][a-z]+day, ([A-Z][a-z]+) (\d{1,2}), (\d{4})", tds[0])
+            if not dm:
+                continue
+            d = datetime.strptime(" ".join(dm.groups()), "%B %d %Y").date().isoformat()
+            close = re.sub(r"<[^>]+>", "", tds[4]).replace(",", "").strip()
+            try:
+                rows.append([d, round(float(close), 6)])
+            except ValueError:
+                pass
+        s = e + timedelta(days=1)
+    return rows
+
+
+def ft_source(isin, currency, start):
     txt = get(f"https://markets.ft.com/data/funds/tearsheet/summary?s={isin}:{currency}")
     m = re.search(r'mod-ui-data-list__value">\s*([\d.,]+)\s*<', txt)
     if not m:
         raise ValueError("FT: no se encontró el precio")
     price = float(m.group(1).replace(",", ""))
     dm = re.search(r"[Aa]s of ([A-Z][a-z]{2}) (\d{1,2}) (\d{4})", txt)
-    if dm:
-        d = datetime.strptime(" ".join(dm.groups()), "%b %d %Y").date().isoformat()
-    else:
-        d = date.today().isoformat()
+    d = datetime.strptime(" ".join(dm.groups()), "%b %d %Y").date().isoformat() if dm else date.today().isoformat()
     nm = re.search(r'mod-tearsheet-overview__header__name[^>]*>([^<]+)<', txt)
-    return [[d, round(price, 6)]], (nm.group(1).strip() if nm else None)
+    hist = []
+    xm = re.search(r'xid(?:&quot;|")\s*:\s*(?:&quot;|")(\d+)', txt)
+    if xm:
+        try:
+            hist = ft_history(xm.group(1), start, date.today())
+        except Exception as e:  # noqa: BLE001
+            print(f"{isin}: sin histórico de FT ({e}); solo último precio", file=sys.stderr)
+    hist.append([d, round(price, 6)])
+    return hist, (html.unescape(nm.group(1).strip()) if nm else None)
 
 
 def merge(old, new):
@@ -94,14 +125,16 @@ def main():
         entry = navs["funds"].setdefault(isin, {"name": f.get("label"), "currency": cur, "history": []})
         old = entry.get("history", [])
         start = (date.fromisoformat(old[-1][0]) - timedelta(days=10)) if old else date.today() - timedelta(days=365 * KEEP_YEARS)
-        for source, fn in (("morningstar", lambda: morningstar_history(isin, cur, start)),
-                           ("ft", lambda: ft_latest(isin, cur))):
+        if len(old) < 30:
+            start = date.today() - timedelta(days=365 * KEEP_YEARS)
+        for source, fn in (("ft", lambda: ft_source(isin, cur, start)),
+                           ("morningstar", lambda: morningstar_history(isin, cur, start))):
             try:
                 hist, name = fn()
                 entry["history"] = merge(old, hist)
                 entry["source"] = source
                 if name:
-                    entry["name"] = name
+                    entry["name"] = html.unescape(name)
                 last = entry["history"][-1]
                 print(f"{isin}: {last[1]} ({last[0]}) vía {source}, {len(hist)} precios recibidos")
                 ok += 1
