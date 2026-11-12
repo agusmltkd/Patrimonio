@@ -270,7 +270,7 @@ function defaults() {
       {id:uid(), name:'Cuenta remunerada', entity:'Trade Republic', type:'remunerada', bucket:'casa', balance:6017, rate:2.5, invested:null},
       {id:uid(), name:'Cuenta corriente', entity:'BBVA', type:'corriente', bucket:'operativo', balance:5100, rate:0, invested:null}
     ],
-    plan: {salary:1790, extraPays:2, expenses:350, spMonthly:400, emergencyTarget:4000, operatingTarget:1000, moveIdle:true, includeSide:false, horizon:10, spYears:10},
+    plan: {salary:1790, extraPays:2, expenses:350, spMonthly:400, emergencyTarget:4000, operatingTarget:1000, moveIdle:true, includeSide:false, horizon:10, spYears:10, payday:28},
     house: {price:180000, downPct:20, young:true, itpYoung:3.5, itpGeneral:7, otherCosts:3000, furnish:3000, mortgageRate:3, years:30},
     ui: {name:'Agustín', welcomeDone:false},
     tax: {retains:{}, interest:{}},
@@ -553,6 +553,20 @@ function reportKeys() {
   if (!keys.includes(cur)) keys.push(cur);
   return keys.sort().filter(k => buildReport(k));
 }
+function paydaysBetween(startISO, endISO) {
+  // Nóminas cobradas en (start, end]: el día de cobro de cada mes, más la paga extra en junio/diciembre
+  const p = S.plan, day = Math.min(31, Math.max(1, Math.round(fin(+p.payday) || 28)));
+  const ex = +p.extraPays >= 2 ? [6, 12] : (+p.extraPays === 1 ? [12] : []);
+  let [y, m] = startISO.split('-').map(Number); let total = 0, count = 0;
+  for (let k = 0; k < 400; k++) {
+    const dim = new Date(y, m, 0).getDate();
+    const d = `${y}-${pad(m)}-${pad(Math.min(day, dim))}`;
+    if (d > endISO) break;
+    if (d > startISO) { total += fin(+p.salary) * (ex.includes(m) ? 2 : 1); count++; }
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  return {total, count};
+}
 function buildReport(key) {
   const ends = monthEnds(), cur = todayISO().slice(0, 7);
   const snaps = sortedSnaps();
@@ -575,7 +589,11 @@ function buildReport(key) {
   const saved = delta - market - interest;
   const extraInc = S.income.filter(i => i.date > start.date && i.date <= end.date).reduce((s, i) => s + fin(i.amount), 0);
   const byB = {}; for (const k of BK) byB[k] = (end.byBucket?.[k] || 0) - (start.byBucket?.[k] || 0);
-  return {key, start, end, days, delta, deltaPct: start.total ? delta / start.total * 100 : 0, market, interest, saved, bought, extraInc, byB, live: key === cur};
+  const pay = paydaysBetween(start.date, end.date);
+  const income = pay.total + extraInc;
+  const spent = income - saved;
+  const planned = fin(+S.plan.expenses) * Math.max(1, Math.round(days / 30.44));
+  return {key, start, end, days, delta, deltaPct: start.total ? delta / start.total * 100 : 0, market, interest, saved, bought, extraInc, byB, live: key === cur, pay, income, spent, planned};
 }
 function interestEstimate(a, year) {
   // Interés aproximado de 'a' en 'year' a partir de las revisiones mensuales
@@ -716,7 +734,8 @@ function reportCard() {
   return `<section class="card">
     <h2><span class="em">📋</span>Resumen de ${monthName(r.key)}${r.live ? ' (hasta hoy)' : ''}</h2>
     <div class="delta-big num ${up ? 'up' : 'down'}">${up ? '+' : ''}${eur(r.delta)}</div>
-    <p class="small muted" style="margin:2px 0 10px">Has ahorrado unos <b>${eur(r.saved)}</b> y el mercado te ha dado <b>${r.market >= 0 ? '+' : ''}${eur(r.market)}</b>.</p>
+    <p class="small muted" style="margin:2px 0 6px">Has ahorrado unos <b>${eur(r.saved)}</b> y el mercado te ha dado <b>${r.market >= 0 ? '+' : ''}${eur(r.market)}</b>.</p>
+    ${r.pay.count ? `<p class="small" style="margin:0 0 10px">💳 Has gastado unos <b class="${r.spent > r.planned * 1.1 ? 'down' : ''}">${eur(Math.max(0, r.spent))}</b> <span class="muted">(tu plan: ${eur(r.planned)})</span></p>` : ''}
     <button class="btn ghost block" data-action="report" data-v="${r.key}">Ver el resumen completo</button>
   </section>`;
 }
@@ -748,10 +767,29 @@ function reportForm(key) {
     </div>
     ${r.extraInc ? `<p class="small" style="margin:10px 0 0">⚡ Ingresos extra: <b class="up">+${eur(r.extraInc)}</b></p>` : ''}
     ${cmp}
+    ${spendBlock(r, keys)}
     <h3 style="margin:16px 0 4px">Cómo ha cambiado cada hucha</h3>
     ${bRows}
-    <p class="note">"Has ahorrado" se calcula restando al cambio total lo que han ganado o perdido tus fondos y los intereses estimados. Es una aproximación.</p>
+    <p class="note">"Has ahorrado" es el cambio total menos lo que han ganado o perdido tus fondos y los intereses. Para que el gasto salga bien: haz la revisión siempre el mismo día y apunta en Extras cualquier ingreso fuera de la nómina.</p>
     <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
+function spendBlock(r, keys) {
+  if (!r.pay.count) return `<h3 style="margin:16px 0 4px">💳 Lo que has gastado</h3><p class="help">Entre estas dos revisiones no ha caído ninguna nómina (cobras el día ${S.plan.payday} de cada mes), así que aún no se puede calcular. Si no es tu día de cobro, cámbialo en Plan.</p>`;
+  const sp = r.spent, pl = r.planned, diff = sp - pl;
+  const weird = sp < 0;
+  const max = Math.max(sp, pl, 1);
+  const hist = keys.map(k => buildReport(k)).filter(x => x && x.pay.count && x.spent >= 0).slice(-6);
+  const hmax = Math.max(1, ...hist.map(x => x.spent), pl);
+  return `<h3 style="margin:16px 0 4px">💳 Lo que has gastado (aprox.)</h3>
+    ${weird ? `<div class="alert warn"><span class="ic">🤔</span><div class="bd">Sale un gasto negativo: ha entrado dinero que la app no conoce (un regalo, un Bizum, una devolución…) o falta alguna cuenta. Apúntalo en Extras si es un ingreso.</div></div>` : `
+    <div class="delta-big num ${diff > pl * 0.1 ? 'down' : 'up'}">${eur(sp)}</div>
+    <p style="margin:2px 0 8px">${Math.abs(diff) < Math.max(30, pl * 0.1) ? 'Justo lo que tenías previsto. 👌' : diff > 0 ? `Te has pasado <b class="down">${eur(diff)}</b> de lo previsto (${eur(pl)}).` : `Has gastado <b class="up">${eur(-diff)} menos</b> de lo previsto (${eur(pl)}). 🎉`}</p>
+    <div class="rows small">
+      <div class="row"><span>Real</span><span style="flex:1;margin:0 10px;height:10px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${sp / max * 100}%;background:var(--b-gastos)"></i></span><b class="num">${eur(sp)}</b></div>
+      <div class="row"><span>Plan</span><span style="flex:1;margin:0 10px;height:10px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${pl / max * 100}%;background:var(--b-operativo)"></i></span><b class="num">${eur(pl)}</b></div>
+    </div>`}
+    <p class="help" style="margin-top:8px">Cómo se calcula: has cobrado <b>${eur(r.pay.total)}</b>${r.pay.count > 1 ? ` (${r.pay.count} nóminas)` : ''}${r.extraInc ? ` + ${eur(r.extraInc)} de ingresos extra` : ''} y tu dinero ha crecido <b>${eur(r.saved)}</b> por ahorro propio. La diferencia es lo que ha salido: <b>${eur(sp)}</b>.</p>
+    ${hist.length > 1 ? `<h3 style="margin:12px 0 4px">Últimos meses</h3>${hist.map(x => `<div class="row small" style="padding:4px 0"><span style="width:76px;text-transform:capitalize">${MONTHS[+x.key.slice(5) - 1].slice(0, 3)} ${x.key.slice(2, 4)}</span><span style="flex:1;margin:0 10px;height:10px;border-radius:99px;background:var(--line);overflow:hidden"><i style="display:block;height:100%;width:${x.spent / hmax * 100}%;background:${x.spent > pl * 1.1 ? 'var(--bad)' : 'var(--b-gastos)'}"></i></span><b class="num">${eur(x.spent)}</b></div>`).join('')}` : ''}`;
 }
 function greeting() {
   const h = new Date().getHours();
@@ -1091,7 +1129,7 @@ function updateReparto() {
   const emerg = sums().emergencia < S.plan.emergencyTarget;
   const p = S.plan, extra = fin(+p.extraPays) * fin(+p.salary);
   $('#rlegend').innerHTML = `
-    <div class="legend-row"><i style="background:var(--b-gastos)"></i><span>Para vivir<small>Gastos, ocio, caprichos</small></span><b class="num">${eur(d.exp)}<small style="text-align:right">${pct(P(d.exp), 0)}</small></b></div>
+    <div class="legend-row"><i style="background:var(--b-gastos)"></i><span>Para vivir<small>${(() => { const ks = reportKeys(); const last = ks.length ? buildReport(ks[ks.length - 1]) : null; return last && last.pay.count && last.spent >= 0 ? `El último mes gastaste ${eur(last.spent)}` : 'Gastos, ocio, caprichos'; })()}</small></span><b class="num">${eur(d.exp)}<small style="text-align:right">${pct(P(d.exp), 0)}</small></b></div>
     <div class="legend-row"><i style="background:var(--b-largo)"></i><span>S&P 500<small>Inversión a largo plazo</small></span><b class="num">${eur(d.sp)}<small style="text-align:right">${pct(P(d.sp), 0)}</small></b></div>
     <div class="legend-row"><i style="background:var(--b-casa)"></i><span>${emerg ? 'Colchón y casa' : 'Para la casa'}<small>${emerg ? 'Primero completa el colchón, luego a la casa' : 'Ahorro para la entrada'}</small></span><b class="num">${eur(d.casa)}<small style="text-align:right">${pct(P(d.casa), 0)}</small></b></div>`;
   $('#rnote').innerHTML = d.over
@@ -1275,6 +1313,7 @@ function viewPlan() {
       ${num('Nómina neta al mes', 'plan.salary', {suf:'€', step:10, min:0})}
       ${num('Pagas extra al año', 'plan.extraPays', {step:1, min:0, hint:'Se cobran en junio y diciembre'})}
       ${num('Lo que gastas al mes', 'plan.expenses', {suf:'€', step:10, min:0})}
+      ${num('Día del mes en que cobras', 'plan.payday', {step:1, min:1, hint:'Para calcular lo que gastas cada mes'})}
       ${num('Al S&P 500 al mes', 'plan.spMonthly', {suf:'€/mes', step:50, min:0})}
     </div>
   </section>
