@@ -273,6 +273,7 @@ function defaults() {
     plan: {salary:1790, extraPays:2, expenses:350, spMonthly:400, emergencyTarget:4000, operatingTarget:1000, moveIdle:true, includeSide:false, horizon:10, spYears:10},
     house: {price:180000, downPct:20, young:true, itpYoung:3.5, itpGeneral:7, otherCosts:3000, furnish:3000, mortgageRate:3, years:30},
     ui: {name:'Agustín', welcomeDone:false},
+    tax: {retains:{}, interest:{}},
     snapshots: [],
     projects: [
       'Software para casetas y hermandades',
@@ -292,7 +293,7 @@ function defaults() {
       'Probar una tanda en Monteblanco'
     ].map(text => ({id:uid(), text, done:false}))
   };
-  s.accounts.forEach(x => { x.lots = []; });
+  s.accounts.forEach(x => { x.lots = []; x.sales = []; });
   s.snapshots.push(makeSnapshot(s, todayISO()));
   return s;
 }
@@ -303,6 +304,7 @@ function normalize(s) {
   out.plan = Object.assign({}, d.plan, s.plan || {});
   out.house = Object.assign({}, d.house, s.house || {});
   out.ui = Object.assign({}, d.ui, s.ui || {});
+  out.tax = Object.assign({retains:{}, interest:{}}, s.tax || {});
   for (const k of ['snapshots','projects','income','checklist']) if (!Array.isArray(out[k])) out[k] = [];
   out.accounts = out.accounts.map(a => ({
     id: a.id || uid(), name: a.name || 'Cuenta', entity: a.entity || '', type: TYPES[a.type] ? a.type : 'otro',
@@ -310,6 +312,7 @@ function normalize(s) {
     invested: (a.invested === null || a.invested === '' || a.invested === undefined) ? null : fin(+a.invested),
     isin: a.isin ? String(a.isin).trim().toUpperCase() : null,
     units: (a.units === null || a.units === '' || a.units === undefined) ? null : fin(+a.units),
+    sales: Array.isArray(a.sales) ? a.sales.filter(x => x && x.date) : [],
     lots: Array.isArray(a.lots) ? a.lots.filter(l => l && l.date && fin(+l.amount) > 0).map(l => ({id: l.id || uid(), date: l.date, amount: fin(+l.amount), units: fin(+l.units)})) : []
   }));
   if (!s.version || s.version < 2) {
@@ -349,7 +352,8 @@ function navAt(isin, date) {
 function applyNavs() {
   let changed = false;
   for (const a of S.accounts) {
-    if (!a.isin || !(a.units > 0)) continue;
+    if (!a.isin || a.units == null) continue;
+    if (a.units <= 0) { if (a.balance !== 0) { a.balance = 0; changed = true; } continue; }
     const n = navOf(a.isin); if (!n) continue;
     const v = round2(a.units * n.nav);
     if (v !== a.balance) { a.balance = v; changed = true; }
@@ -373,6 +377,27 @@ async function loadNavs() {
   }
 }
 if (applyNavs()) save();
+
+/* ---------- IPC (ipc.json, lo actualiza la misma Action desde el INE) ---------- */
+const IPC_KEY = 'patrimonio.ipc';
+const IPC_URLS = ['https://raw.githubusercontent.com/agusmltkd/Patrimonio/main/ipc.json', './ipc.json'];
+let IPC = (() => { try { return JSON.parse(localStorage.getItem(IPC_KEY)) || null; } catch (e) { return null; } })();
+async function loadIpc() {
+  for (const url of IPC_URLS) {
+    try {
+      const r = await fetch(url + '?t=' + Date.now(), {cache: 'no-store'}); if (!r.ok) continue;
+      const j = await r.json(); if (!j || !(j.yoy || j.index)) continue;
+      IPC = j; try { localStorage.setItem(IPC_KEY, JSON.stringify(j)); } catch (e) {}
+      if (!document.querySelector('#modal:not(.hidden)') && !document.activeElement?.dataset?.bind && !dragging) render();
+      return;
+    } catch (e) {}
+  }
+}
+const ipcYoy = () => IPC?.yoy?.length ? IPC.yoy[IPC.yoy.length - 1] : null;               // ['2026-10', 2.4]
+const ipcAvg = years => { const y = IPC?.yoy || []; const last = y.slice(-12 * years); return last.length >= 12 ? last.reduce((s, r) => s + r[1], 0) / last.length : 2; };
+function ipcIndexAt(month) { const ix = IPC?.index || []; let best = null; for (const r of ix) { if (r[0] <= month) best = r; else break; } return best || ix[0] || null; }
+function ipcFactor(fromMonth) { const ix = IPC?.index || []; if (!ix.length) return null; const a = ipcIndexAt(fromMonth), b = ix[ix.length - 1]; return a && b ? b[1] / a[1] : null; }
+const monthLabelK = k => { const [y, m] = k.split('-').map(Number); return `${MONTHS[m - 1]} ${y}`; };
 
 const getPath = p => p.split('.').reduce((o, k) => o?.[k], S);
 const setPath = (p, v) => { const ks = p.split('.'); const last = ks.pop(); ks.reduce((o, k) => o[k], S)[last] = v; };
@@ -503,7 +528,7 @@ function buildAlerts(b, sim) {
   }
   if (idle > 200) {
     const r = bucketRate('casa');
-    out.push({t:'warn', ic:'💤', h:`<b>${eur(idle)} están parados.</b> Es lo que tienes en cuentas del día a día por encima de lo que necesitas (${eur(p.operatingTarget)}). Movidos a una cuenta al ${pct(r)} te darían unos <b>${eur(idle * r / 100)} al año</b>.`, btn:['Ver mis cuentas', 'goto:cuentas']});
+    out.push({t:'warn', ic:'💤', h:`<b>${eur(idle)} están parados.</b> Es lo que tienes en cuentas del día a día por encima de lo que necesitas (${eur(p.operatingTarget)}). Movidos a una cuenta al ${pct(r)} te darían unos <b>${eur(idle * r / 100)} al año</b>.${ipcYoy() ? ` Parados, la inflación (${pct(ipcYoy()[1])}) les quita unos ${eur(idle * ipcYoy()[1] / 100)} al año.` : ''}`, btn:['Ver mis cuentas', 'goto:cuentas']});
   }
   if (b.emergencia < p.emergencyTarget) {
     const falta = p.emergencyTarget - b.emergencia;
@@ -552,6 +577,137 @@ function buildReport(key) {
   const byB = {}; for (const k of BK) byB[k] = (end.byBucket?.[k] || 0) - (start.byBucket?.[k] || 0);
   return {key, start, end, days, delta, deltaPct: start.total ? delta / start.total * 100 : 0, market, interest, saved, bought, extraInc, byB, live: key === cur};
 }
+function interestEstimate(a, year) {
+  // Interés aproximado de 'a' en 'year' a partir de las revisiones mensuales
+  if (a.isin || !(a.rate > 0)) return 0;
+  const y0 = `${year}-01-01`, y1 = `${year}-12-31`, today = todayISO();
+  const pts = sortedSnaps().filter(x => x.balances && x.balances[a.id] != null).map(x => [x.date, x.balances[a.id]]);
+  pts.push([today, a.balance]);
+  let tot = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const from = pts[i][0] < y0 ? y0 : pts[i][0];
+    const toRaw = i + 1 < pts.length ? pts[i + 1][0] : (today < y1 ? today : y1);
+    const to = toRaw > y1 ? y1 : toRaw;
+    if (to <= from) continue;
+    const days = (new Date(to + 'T12:00:00') - new Date(from + 'T12:00:00')) / 864e5;
+    tot += pts[i][1] * a.rate / 100 * days / 365;
+  }
+  return tot;
+}
+function savingsTax(base) {
+  const br = [[6000, 19], [50000, 21], [200000, 23], [300000, 27], [Infinity, 30]];
+  let left = Math.max(0, base), prev = 0, t = 0;
+  for (const [top, r] of br) { const chunk = Math.min(left, top - prev); if (chunk <= 0) break; t += chunk * r / 100; left -= chunk; prev = top; }
+  return t;
+}
+function rentaForm(year) {
+  const cy = new Date().getFullYear();
+  const firstY = Math.min(cy, ...sortedSnaps().map(x => +x.date.slice(0, 4)), ...S.accounts.flatMap(a => (a.sales || []).map(x => +x.date.slice(0, 4))));
+  year = year || (new Date().getMonth() < 6 && firstY < cy ? cy - 1 : cy);
+  const years = []; for (let y = firstY; y <= cy; y++) years.push(y);
+  const key = String(year);
+  const man = S.tax.interest[key] || {};
+  const intRows = S.accounts.filter(a => !a.isin && (a.rate > 0 || man[a.id] != null)).map(a => {
+    const est = interestEstimate(a, year); const real = man[a.id];
+    return {a, est, real, v: real != null ? real : est, ret: !!S.tax.retains[a.id]};
+  });
+  const sales = S.accounts.flatMap(a => (a.sales || []).filter(x => x.date.startsWith(key)).map(x => ({...x, a})));
+  const taxable = sales.filter(x => !x.transfer);
+  const gains = taxable.reduce((s, x) => s + (x.gain || 0), 0);
+  const interest = intRows.reduce((s, r) => s + r.v, 0);
+  let base = interest + Math.max(0, gains), compNote = '';
+  if (gains < 0) { const comp = Math.min(-gains, interest * 0.25); base = interest - comp; compNote = `Tus pérdidas por ventas (${eur(-gains)}) compensan hasta el 25 % de los intereses (${eur(comp)}). Lo que sobre se puede compensar en los 4 años siguientes.`; }
+  const tax = savingsTax(base);
+  const withheld = intRows.filter(r => r.ret).reduce((s, r) => s + r.v * 0.19, 0);
+  const diff = tax - withheld;
+  const partial = year === cy;
+  openModal(`<h2>🧾 Declaración de la renta</h2>
+    <div class="chips">${years.map(y => `<button class="chip ${y === year ? 'on' : ''}" data-action="renta" data-v="${y}">${y}</button>`).join('')}</div>
+    <p class="help">Lo que tus ahorros e inversiones aportan a la renta de <b>${year}</b>${partial ? ' (año en curso, hasta hoy)' : ''}, que se presenta entre abril y junio de ${year + 1}. Tu nómina va aparte.</p>
+
+    <h3 style="margin:12px 0 4px">💶 Intereses de cuentas</h3>
+    <p class="help">Estimados con tus revisiones mensuales. Cuando tu banco te mande el certificado fiscal (enero–marzo), escribe la cifra real.</p>
+    ${intRows.length ? intRows.map(r => `<div style="padding:8px 0;border-top:1px solid var(--line)">
+      <div class="row"><span><b>${esc(r.a.name)}</b><div class="meta small muted">${esc(r.a.entity)} · estimado ${eur(r.est, 2)}</div></span><b class="num">${eur(r.v, 2)}</b></div>
+      <div class="grid2" style="margin-top:6px">
+        <div class="inp"><input type="text" inputmode="decimal" placeholder="Real (€)" data-renta-int="${r.a.id}" data-year="${key}" value="${r.real != null ? showNum(r.real) : ''}"></div>
+        <label class="toggle" style="padding:4px 0"><input type="checkbox" data-renta-ret="${r.a.id}" ${r.ret ? 'checked' : ''}><span class="sw"></span><span class="tl small">Me retienen el 19 %</span></label>
+      </div></div>`).join('') : '<p class="empty">No hay cuentas con interés.</p>'}
+
+    <h3 style="margin:16px 0 4px">📉 Ventas de fondos</h3>
+    ${sales.length ? sales.map(x => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span><b>${esc(x.a.name)}</b><div class="meta small muted">${dateFmt(x.date)} · vendido ${eur(x.amount)}${x.transfer ? ' · traspaso (no tributa)' : ''}</div></span><b class="num ${x.gain == null ? 'muted' : x.gain >= 0 ? 'up' : 'down'}">${x.gain == null ? '¿?' : (x.gain >= 0 ? '+' : '') + eur(x.gain, 2)}</b></div>`).join('') : '<p class="empty">No has vendido fondos este año. Si no vendes, no hay nada que declarar de ellos: los fondos solo tributan al vender.</p>'}
+
+    <h3 style="margin:16px 0 6px">🧮 Lo que supone en tu renta</h3>
+    <div class="kpis">
+      <div class="kpi"><b class="num">${eur(interest, 2)}</b><span>Intereses</span></div>
+      <div class="kpi"><b class="num ${gains >= 0 ? '' : 'down'}">${gains >= 0 ? '+' : ''}${eur(gains, 2)}</b><span>Ganancias por ventas</span></div>
+      <div class="kpi"><b class="num">${eur(tax, 2)}</b><span>Impuesto (base del ahorro)</span></div>
+      <div class="kpi"><b class="num">${eur(withheld, 2)}</b><span>Ya retenido por los bancos</span></div>
+    </div>
+    <div class="alert ${diff > 1 ? 'warn' : 'info'}" style="margin-top:10px"><span class="ic">${diff > 1 ? '💸' : '✅'}</span><div class="bd">${diff > 1 ? `Por esta parte te saldrían <b>unos ${eur(diff, 0)} a pagar</b> en la renta.` : `Por esta parte no deberías pagar nada extra${diff < -1 ? ` (incluso te devolverían unos ${eur(-diff, 0)})` : ''}.`}</div></div>
+    ${compNote ? `<p class="help">${compNote}</p>` : ''}
+
+    <h3 style="margin:16px 0 4px">✅ Qué revisar en el borrador</h3>
+    <ul class="small" style="padding-left:18px;margin:4px 0">
+      <li>Que aparezcan los intereses de <b>todas</b> tus cuentas. Los bancos extranjeros a veces no informan a Hacienda: si falta alguno, añádelo tú.</li>
+      <li>Si vendiste fondos: que la venta esté con su valor de compra correcto. MyInvestor te da un informe fiscal anual con esos datos.</li>
+      <li>Los traspasos entre fondos no se declaran como venta.</li>
+      <li>Si alguna vez tuvieras más de 50.000 € en entidades extranjeras (como Trade Republic), habría que presentar el modelo 720 antes del 31 de marzo.</li>
+    </ul>
+    <p class="note">Escala del ahorro 2026: 19 % hasta 6.000 €, 21 % hasta 50.000 €, 23 % hasta 200.000 €, 27 % hasta 300.000 € y 30 % a partir de ahí. Es una estimación orientativa: el resultado final lo da Renta Web junto con tu nómina.</p>
+    <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+  document.querySelectorAll('[data-renta-int]').forEach(el => el.addEventListener('change', () => {
+    const v = parseFloat(el.value.replace(/\s/g, '').replace(',', '.'));
+    const y = el.dataset.year; S.tax.interest[y] ||= {};
+    if (isFinite(v)) S.tax.interest[y][el.dataset.rentaInt] = v; else delete S.tax.interest[y][el.dataset.rentaInt];
+    save(); rentaForm(year);
+  }));
+  document.querySelectorAll('[data-renta-ret]').forEach(el => el.addEventListener('change', () => { S.tax.retains[el.dataset.rentaRet] = el.checked; save(); rentaForm(year); }));
+}
+
+/* ---------- inflación ---------- */
+function inflForm() {
+  const last = ipcYoy();
+  if (!last) { openModal(`<h2>🎈 Inflación</h2><p class="empty">Aún no se han descargado los datos del IPC. Se cargan solos con la actualización diaria; vuelve a mirar en un rato.</p><div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`); return; }
+  const infl = last[1];
+  const yo = (IPC.yoy || []).slice(-60);
+  const avg10 = ipcAvg(10);
+  const accRows = S.accounts.filter(a => a.balance > 0).map(a => {
+    const r = a.rate; const real = r - infl; const eurY = a.balance * real / 100;
+    return `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span><b>${esc(a.name)}</b><div class="meta small muted">Da ${pct(r)}${a.type === 'indexado' ? ' esperado' : ''} − inflación ${pct(infl)} = <b class="${real >= 0 ? 'up' : 'down'}">${real >= 0 ? '+' : ''}${pct(real)}</b></div></span><b class="num ${eurY >= 0 ? 'up' : 'down'}">${eurY >= 0 ? '+' : ''}${eur(eurY)}/año</b></div>`;
+  }).join('');
+  const totReal = S.accounts.reduce((s, a) => s + a.balance * (a.rate - infl) / 100, 0);
+  const parked = S.accounts.filter(a => !a.isin && a.rate < infl).reduce((s, a) => s + a.balance * (infl - a.rate) / 100, 0);
+  const first = sortedSnaps()[0];
+  const fStart = first ? ipcFactor(first.date.slice(0, 7)) : null;
+  const ix = IPC.index || []; const lastIx = ix[ix.length - 1];
+  const f5 = lastIx ? ipcFactor(`${+lastIx[0].slice(0, 4) - 5}${lastIx[0].slice(4)}`) : null;
+  const f10 = lastIx ? ipcFactor(`${+lastIx[0].slice(0, 4) - 10}${lastIx[0].slice(4)}`) : null;
+  const sim = simulate(); const h = S.house;
+  const yrsToHouse = sim.eta != null ? sim.eta / 12 : null;
+  const futurePrice = yrsToHouse != null ? h.price * Math.pow(1 + avg10 / 100, yrsToHouse) : null;
+  openModal(`<h2>🎈 Inflación</h2>
+    <p class="small muted" style="margin:0">Según el INE, los precios han subido en el último año</p>
+    <div class="delta-big num ${infl > 3 ? 'down' : ''}">${pct(infl)}</div>
+    <p class="help">Dato de ${monthLabelK(last[0])}. Media de los últimos 10 años: ${pct(avg10)}.</p>
+    ${lineChart({labels: yo.map(r => { const [y, m] = r[0].split('-'); return `${MONTHS[+m - 1].slice(0, 3)} ${y.slice(2)}`; }), series: [{name:'IPC, variación anual (%)', color:'var(--b-gastos)', values: yo.map(r => r[1])}], height: 170, zero: false})}
+
+    <h3 style="margin:16px 0 4px">💸 Tu dinero frente a la inflación</h3>
+    <p class="help">Si tu dinero gana menos que la inflación, cada año puedes comprar menos con él aunque el saldo no baje.</p>
+    ${accRows}
+    <div class="alert ${totReal >= 0 ? 'info' : 'warn'}" style="margin-top:10px"><span class="ic">${totReal >= 0 ? '💪' : '📉'}</span><div class="bd">En conjunto, tu dinero ${totReal >= 0 ? `gana unos <b>${eur(totReal)} al año</b> por encima de la inflación` : `pierde unos <b>${eur(-totReal)} al año</b> de poder de compra`}.${parked > 1 ? ` Solo el dinero que rinde menos que la inflación te cuesta <b>${eur(parked)} al año</b>.` : ''}</div></div>
+
+    <h3 style="margin:16px 0 4px">🕰️ Lo que vale el dinero de antes</h3>
+    <div class="rows">
+      ${f5 ? `<div class="row"><span>1.000 € de hace 5 años equivalen hoy a</span><b class="num">${eur(1000 * f5)}</b></div>` : ''}
+      ${f10 ? `<div class="row"><span>1.000 € de hace 10 años equivalen hoy a</span><b class="num">${eur(1000 * f10)}</b></div>` : ''}
+      ${first && fStart ? `<div class="row"><span>Desde tu primera revisión (${dateFmt(first.date)}) los precios han subido</span><b class="num">${pct((fStart - 1) * 100)}</b></div>` : ''}
+    </div>
+    ${futurePrice ? `<h3 style="margin:16px 0 4px">🏠 Y la casa</h3><p class="small">Si los pisos subieran como la inflación media (${pct(avg10)}), tu piso de ${eur(h.price)} costaría unos <b>${eur(futurePrice)}</b> cuando lo compres (${monthLabel(addMonths(sim.eta))}). Tenlo en cuenta al fijar el precio en la pestaña Casa.</p>` : ''}
+    <p class="note">Datos del IPC general nacional del INE, actualizados automáticamente cada mes.</p>
+    <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
+
 function reportCard() {
   const keys = reportKeys();
   if (!keys.length) return `<section class="card"><h2><span class="em">📋</span>Resumen del mes</h2><p class="empty">Tu primer resumen estará listo cuando hagas la revisión del mes que viene. Ahí verás cuánto has ahorrado, cuánto te ha dado el mercado y cómo ha cambiado cada hucha.</p></section>`;
@@ -665,11 +821,35 @@ function viewResumen() {
       <div class="kpi"><b class="num">${eur(safe)}</b><span>Intereses seguros de cuentas y fondo monetario</span></div>
       <div class="kpi"><b class="num">${eur(expRet)}</b><span>Lo que se espera de la inversión (puede variar)</span></div>
     </div>
+    ${ipcYoy() ? (() => { const inf = ipcYoy()[1]; const lost = total * inf / 100; const net = safe + expRet - lost; return `<div class="row small" style="margin-top:10px"><span class="muted">🎈 La inflación (${pct(inf)}) le resta a tu dinero</span><b class="num down">−${eur(lost)}</b></div><div class="row small"><span class="muted">Lo que ganas de verdad, descontando la inflación</span><b class="num ${net >= 0 ? 'up' : 'down'}">${net >= 0 ? '+' : ''}${eur(net)}</b></div>`; })() : ''}
   </section>
   ${reportCard()}
-  <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>`;
+  <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>
+  <section class="card">
+    <h2><span class="em">🧰</span>Herramientas</h2>
+    <div class="btnrow"><button class="btn ghost" data-action="renta" data-v="">🧾 Renta</button><button class="btn ghost" data-action="infl">🎈 Inflación${ipcYoy() ? ` · ${pct(ipcYoy()[1])}` : ''}</button></div>
+  </section>`;
 }
 
+function fifoCost(a, units, date) {
+  // Coste fiscal (FIFO) de vender 'units' participaciones en 'date', según las compras apuntadas
+  const lots = [...(a.lots || [])].filter(l => l.date <= date).sort((x, y) => x.date.localeCompare(y.date));
+  let skip = (a.sales || []).filter(x => x.date <= date).reduce((s, x) => s + x.units, 0);
+  let left = units, cost = 0;
+  for (const l of lots) {
+    let avail = l.units;
+    if (skip > 0) { const t = Math.min(skip, avail); skip -= t; avail -= t; }
+    if (avail <= 0) continue;
+    const take = Math.min(left, avail); cost += l.amount * take / l.units; left -= take;
+    if (left <= 1e-9) break;
+  }
+  if (left > 1e-6) {
+    const avg = a.invested != null && a.units > 0 ? a.invested / a.units : null;
+    if (avg == null) return null;
+    cost += avg * left;
+  }
+  return cost;
+}
 function lotUnits(isin, date, amount) { const at = navAt(isin, date); return at ? Math.round(amount / at[1] * 10000) / 10000 : 0; }
 function fundPerf(a) {
   const lots = [...(a.lots || [])].sort((x, y) => x.date.localeCompare(y.date));
@@ -680,13 +860,14 @@ function fundPerf(a) {
   if (!pts.length) pts = [h[h.length - 1]];
   const stepN = Math.max(1, Math.floor(pts.length / 100));
   pts = pts.filter((_, i) => i % stepN === 0 || i === pts.length - 1);
-  let li = 0, u = 0, put = 0;
+  const ev = [...lots.map(l => ({date: l.date, u: l.units, c: l.amount})), ...(a.sales || []).map(x => ({date: x.date, u: -x.units, c: -(x.cost || 0)}))].sort((x, y) => x.date.localeCompare(y.date));
+  let ei = 0, u = 0, put = 0;
   const rows = pts.map(([d, nav]) => {
-    while (li < lots.length && lots[li].date <= d) { u += lots[li].units; put += lots[li].amount; li++; }
-    return {d, value: u * nav, put};
+    while (ei < ev.length && ev[ei].date <= d) { u += ev[ei].u; put += ev[ei].c; ei++; }
+    return {d, value: Math.max(0, u) * nav, put: Math.max(0, put)};
   });
   const nav = h[h.length - 1][1];
-  const totU = lots.reduce((s, l) => s + l.units, 0), totPut = lots.reduce((s, l) => s + l.amount, 0);
+  const totU = ev.reduce((s, e) => s + e.u, 0), totPut = Math.max(0, ev.reduce((s, e) => s + e.c, 0));
   const value = totU * nav;
   const per = lots.map(l => ({...l, now: l.units * nav, gain: l.units * nav - l.amount, gp: l.amount ? (l.units * nav / l.amount - 1) * 100 : 0}));
   return {rows, value, put: totPut, gain: value - totPut, gp: totPut ? (value / totPut - 1) * 100 : 0, units: totU, per, nav};
@@ -869,7 +1050,8 @@ function spCard() {
   const good = spFuture(p.spMonthly, yrs, rate + 2, start);
   const putPct = f.total > 0 ? Math.min(100, f.put / f.total * 100) : 100;
   const year = new Date().getFullYear() + yrs;
-  const real = f.total / Math.pow(1.02, yrs);
+  const inflA = ipcAvg(10);
+  const real = f.total / Math.pow(1 + inflA / 100, yrs);
   const others = [...new Set([200, 300, 400, 500])].filter(v => v !== +p.spMonthly).map(v => `<div class="row small"><span class="muted">Con ${eur(v)}/mes</span><span class="num">${eur(spFuture(v, yrs, rate, start).total)}</span></div>`).join('');
   return `<section class="card">
     <h2><span class="em">🌳</span>¿Cuánto tendrás gracias al S&P 500?</h2>
@@ -887,7 +1069,7 @@ function spCard() {
       <div class="kpi"><b class="num">${eur(good.total)}</b><span>Si va bien (${pct(rate + 2, 0)} al año)</span></div>
     </div>
     <div class="rows" style="margin-top:12px">${others}</div>
-    <span class="note">Calculado con un ${pct(rate, 0)} anual, la media histórica aproximada del S&P 500. Algunos años sube mucho y otros cae fuerte: no es una cifra garantizada. Con la inflación, esos ${eur(f.total)} equivaldrían a unos ${eur(real)} de hoy.</span>
+    <span class="note">Calculado con un ${pct(rate, 0)} anual, la media histórica aproximada del S&P 500. Algunos años sube mucho y otros cae fuerte: no es una cifra garantizada. Con la inflación media de los últimos 10 años (${pct(inflA)}, IPC del INE), esos ${eur(f.total)} equivaldrían a unos ${eur(real)} de hoy.</span>
   </section>`;
 }
 
@@ -1193,7 +1375,7 @@ function accForm(a) {
     <p class="help" style="margin-top:-4px">Si pones ISIN y participaciones, el saldo se calcula solo con el precio de cada día.</p>
     ${txtField('Dinero que has metido en total (€) · opcional', 'f-invested', a.invested ?? '', 'number', 'inputmode="decimal" step="any" placeholder="Solo en inversiones, para ver cuánto ganas"')}
     <div class="btnrow"><button class="btn" data-action="save-acc" data-id="${a.id || ''}">Guardar</button><button class="btn ghost" data-action="close">Cancelar</button></div>
-    ${!isNew && a.isin ? `<div class="btnrow"><button class="btn ghost block" data-action="buy" data-id="${a.id}">➕ Registrar una compra</button></div>` : ''}
+    ${!isNew && a.isin ? `<div class="btnrow"><button class="btn ghost" data-action="buy" data-id="${a.id}">➕ Compra</button><button class="btn ghost" data-action="sell" data-id="${a.id}">➖ Venta o traspaso</button></div>` : ''}
     ${isNew ? '' : `<div class="btnrow"><button class="btn danger block" data-action="del-acc" data-id="${a.id}">Eliminar cuenta</button></div>`}`);
 }
 function lotsForm(a, msg) {
@@ -1229,6 +1411,28 @@ function lotsForm(a, msg) {
     <button class="btn ghost block" data-action="add-dca" data-id="${a.id}">Añadir aportaciones mensuales</button>
     ${per.length ? `<div class="btnrow"><button class="btn danger block" data-action="clear-lots" data-id="${a.id}">Borrar todas las compras apuntadas</button></div>` : ''}
     <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
+function sellForm(a) {
+  const dests = S.accounts.filter(x => x.id !== a.id);
+  const destOpts = Object.fromEntries(dests.map(x => [x.id, `${x.name} · ${x.entity}`]));
+  openModal(`<h2>Venta o traspaso de ${esc(a.name)}</h2>
+    <p class="help">Apúntalo cuando saques dinero del fondo. La app calcula la ganancia para la declaración de la renta y mueve el dinero a la cuenta que elijas.</p>
+    <div class="grid2">${txtField('Importe (€)', 's-amount', '', 'number')}${txtField('Fecha', 's-date', todayISO(), 'date')}</div>
+    <label class="toggle"><input type="checkbox" id="s-all"><span class="sw"></span><span class="tl">Vender todo<small>${showNum(a.units || 0)} participaciones</small></span></label>
+    <label class="toggle"><input type="checkbox" id="s-transfer"><span class="sw"></span><span class="tl">Es un traspaso a otro fondo<small>Entre fondos no se paga a Hacienda hasta que vendas el último</small></span></label>
+    <label class="field"><span>¿Adónde va el dinero?</span><div class="inp"><select id="s-dest"><option value="">A ninguna cuenta de la app</option>${opts(destOpts, '')}</select></div></label>
+    ${txtField('Ganancia según MyInvestor (€) · opcional, si la sabes', 's-gain', '', 'number')}
+    <p class="help" id="s-preview"></p>
+    <div class="btnrow"><button class="btn" data-action="save-sell" data-id="${a.id}">Guardar</button><button class="btn ghost" data-action="close">Cancelar</button></div>`);
+  const prev = () => {
+    const at = navAt(a.isin, val('s-date') || todayISO()); if (!at) { $('#s-preview').textContent = ''; return; }
+    const all = $('#s-all').checked; const units = all ? (a.units || 0) : (numVal('s-amount') || 0) / at[1];
+    if (all) $('#s-amount').value = showNum(round2(units * at[1]));
+    const cost = units ? fifoCost(a, units, val('s-date') || todayISO()) : null;
+    const amt = units * at[1];
+    $('#s-preview').innerHTML = units ? `≈ ${units.toLocaleString('es-ES', {maximumFractionDigits:4})} participaciones a ${at[1].toLocaleString('es-ES', {maximumFractionDigits:4})} €.${cost != null ? ` Ganancia estimada: <b class="${amt - cost >= 0 ? 'up' : 'down'}">${amt - cost >= 0 ? '+' : ''}${eur(amt - cost, 2)}</b>${$('#s-transfer').checked ? ' (no tributa por ser traspaso)' : ''}.` : ' Para calcular la ganancia, apunta tus compras o el dinero metido en total.'}` : '';
+  };
+  ['s-amount', 's-date', 's-all', 's-transfer'].forEach(i => { $('#' + i).addEventListener('input', prev); $('#' + i).addEventListener('change', prev); });
 }
 function buyForm(a) {
   const n = navOf(a.isin);
@@ -1314,6 +1518,8 @@ document.addEventListener('click', e => {
     case 'lock-on': lockOn(); break;
     case 'lock-off': if (confirm('¿Desactivar el bloqueo?')) { setLock(null); lockForm(); } break;
     case 'lock-test': lockNow(); tryBio(); break;
+    case 'renta': rentaForm(el.dataset.v ? +el.dataset.v : null); break;
+    case 'infl': inflForm(); break;
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
     case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
@@ -1355,6 +1561,28 @@ document.addEventListener('click', e => {
     }
     case 'del-lot': { const a = S.accounts.find(x => x.id === id); a.lots = a.lots.filter(l => l.id !== el.dataset.lot); save(); render(); lotsForm(a); break; }
     case 'clear-lots': { const a = S.accounts.find(x => x.id === id); if (confirm('¿Borrar todas las compras apuntadas de este fondo?')) { a.lots = []; save(); render(); lotsForm(a); } break; }
+    case 'sell': sellForm(S.accounts.find(a => a.id === id)); break;
+    case 'save-sell': {
+      const a = S.accounts.find(x => x.id === id); const date = val('s-date') || todayISO();
+      const at = navAt(a.isin, date); if (!at) { alert('Aún no hay precios para este fondo.'); return; }
+      const all = $('#s-all').checked; let units = all ? (a.units || 0) : (numVal('s-amount') || 0) / at[1];
+      if (!units || units <= 0) { document.getElementById('s-amount')?.focus(); return; }
+      units = Math.min(units, a.units || units); units = Math.round(units * 10000) / 10000;
+      const amount = round2(units * at[1]);
+      let cost = fifoCost(a, units, date); const gManual = numVal('s-gain');
+      if (gManual != null) cost = amount - gManual;
+      const transfer = $('#s-transfer').checked;
+      (a.sales ||= []).push({id: uid(), date, units, amount, cost: cost != null ? round2(cost) : null, gain: cost != null ? round2(amount - cost) : null, transfer});
+      a.units = Math.max(0, Math.round(((a.units || 0) - units) * 10000) / 10000);
+      if (a.invested != null && cost != null) a.invested = Math.max(0, round2(a.invested - cost));
+      const dest = S.accounts.find(x => x.id === val('s-dest'));
+      if (dest) {
+        const dn = dest.isin ? navAt(dest.isin, date) : null;
+        if (dest.isin && dn) { dest.units = Math.round(((dest.units || 0) + amount / dn[1]) * 10000) / 10000; (dest.lots ||= []).push({id: uid(), date, amount, units: Math.round(amount / dn[1] * 10000) / 10000}); if (dest.invested != null) dest.invested = round2(dest.invested + (transfer && cost != null ? cost : amount)); }
+        else dest.balance = round2(dest.balance + amount);
+      }
+      applyNavs(); closeModal(); commit(); break;
+    }
     case 'buy': buyForm(S.accounts.find(a => a.id === id)); break;
     case 'save-buy': {
       const a = S.accounts.find(x => x.id === id); const amt = numVal('b-amount');
@@ -1448,7 +1676,8 @@ if (getLock()) lockNow();
 render();
 if (getLock()?.credId) tryBio();
 loadNavs();
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadNavs(); });
+loadIpc();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { loadNavs(); loadIpc(); } });
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
