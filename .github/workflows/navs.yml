@@ -1,4 +1,4 @@
-name: Actualizar valores liquidativos
+name: Actualizar valores liquidativos e IPC
 
 on:
   schedule:
@@ -26,14 +26,18 @@ jobs:
       - name: Descargar precios
         run: python scripts/update_navs.py
 
+      - name: Descargar IPC (INE)
+        run: python scripts/update_ipc.py
+        continue-on-error: true
+
       - name: Guardar cambios
         run: |
-          if git diff --quiet -- navs.json && git ls-files --error-unmatch navs.json >/dev/null 2>&1; then
-            echo "Sin precios nuevos"
+          git add navs.json ipc.json 2>/dev/null || git add navs.json
+          if git diff --cached --quiet; then
+            echo "Sin datos nuevos"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add navs.json
-          git commit -m "Valores liquidativos $(date -u +%F)"
+          git commit -m "Datos $(date -u +%F)"
           git push
