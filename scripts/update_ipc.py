@@ -14,7 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "ipc.json"
 API = "https://servicios.ine.es/wstempus/js/ES/DATOS_SERIE/{code}?nult={n}"
-# Índice general nacional y su variación anual (base 2021)
+TABLE = "https://servicios.ine.es/wstempus/js/ES/DATOS_TABLA/{tid}?nult={n}"
+# Tabla "Índice general nacional. Series desde enero de 1961" (se mantiene al día entre cambios de base)
+TABLES = ["24077"]
+# Series de respaldo (base 2021, terminan en diciembre de 2025)
 INDEX_CODES = ["IPC251852"]
 YOY_CODES = ["IPC251856"]
 
@@ -25,10 +28,7 @@ def get_json(url):
         return json.loads(r.read().decode("utf-8"))
 
 
-def series(code, n=200):
-    d = get_json(API.format(code=code, n=n))
-    if isinstance(d, list):
-        d = d[0] if d else {}
+def parse(d):
     name = d.get("Nombre", "")
     rows = []
     for p in d.get("Data", []):
@@ -48,31 +48,53 @@ def series(code, n=200):
     return name, rows
 
 
+def series(code, n=200):
+    d = get_json(API.format(code=code, n=n))
+    if isinstance(d, list):
+        d = d[0] if d else {}
+    return parse(d)
+
+
+def classify(name):
+    n = name.lower()
+    if "variación anual" in n or "variacion anual" in n:
+        return "yoy"
+    if "variación" in n or "variacion" in n or "lo que va de año" in n:
+        return None
+    if "índice" in n or "indice" in n:
+        return "index"
+    return None
+
+
 def main():
     out = {"source": "INE · IPC general nacional"}
-    for code in INDEX_CODES:
+    cands = {"index": [], "yoy": []}
+    for tid in TABLES:
         try:
-            name, rows = series(code)
-            print(f"{code}: {name} · {len(rows)} meses · último {rows[-1] if rows else '-'}")
-            if rows and "índice" in name.lower() and "variación" not in name.lower():
-                out["index"] = rows
-                out["index_name"] = name
-                break
-            print(f"{code}: no parece el índice general, se ignora", file=sys.stderr)
+            for d in get_json(TABLE.format(tid=tid, n=200)) or []:
+                name, rows = parse(d)
+                kind = classify(name)
+                print(f"tabla {tid}: {name.strip()} · {len(rows)} meses · último {rows[-1] if rows else '-'} → {kind}")
+                if kind and rows:
+                    cands[kind].append((rows[-1][0], name, rows))
         except Exception as e:  # noqa: BLE001
-            print(f"{code}: falla: {e}", file=sys.stderr)
-    for code in YOY_CODES:
-        try:
-            name, rows = series(code)
-            print(f"{code}: {name} · {len(rows)} meses · último {rows[-1] if rows else '-'}")
-            if rows and "anual" in name.lower():
-                out["yoy"] = rows
-                out["yoy_name"] = name
-                break
-        except Exception as e:  # noqa: BLE001
-            print(f"{code}: falla: {e}", file=sys.stderr)
-
-    if "yoy" not in out and "index" in out:
+            print(f"tabla {tid}: falla: {e}", file=sys.stderr)
+    for kind, codes in (("index", INDEX_CODES), ("yoy", YOY_CODES)):
+        for code in codes:
+            try:
+                name, rows = series(code)
+                print(f"{code}: {name.strip()} · {len(rows)} meses · último {rows[-1] if rows else '-'}")
+                if rows and classify(name) == kind:
+                    cands[kind].append((rows[-1][0], name, rows))
+            except Exception as e:  # noqa: BLE001
+                print(f"{code}: falla: {e}", file=sys.stderr)
+    for kind in ("index", "yoy"):
+        if cands[kind]:
+            last, name, rows = max(cands[kind], key=lambda c: c[0])
+            out[kind] = rows
+            out[kind + "_name"] = name.strip()
+            print(f"Uso para {kind}: {name.strip()} (hasta {last})")
+    if "index" in out and ("yoy" not in out or out["yoy"][-1][0] < out["index"][-1][0]):
         idx = dict(out["index"])
         yoy = []
         for m, v in out["index"]:
