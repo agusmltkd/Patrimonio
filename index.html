@@ -197,7 +197,7 @@ const dateFmt = iso => new Date(iso + 'T12:00:00').toLocaleDateString('es-ES', {
 const compact = v => {
   const a = Math.abs(v);
   if (a >= 1000) return (v/1000).toLocaleString('es-ES', {maximumFractionDigits: a >= 10000 ? 0 : 1}) + 'k';
-  return Math.round(v).toString();
+  return Math.abs(v) < 100 ? v.toLocaleString('es-ES', {maximumFractionDigits: 2}) : Math.round(v).toString();
 };
 const durText = n => {
   const y = Math.floor(n/12), m = n % 12;
@@ -228,10 +228,10 @@ function makeSnapshot(s, date) {
 }
 function defaults() {
   const s = {
-    version: 1,
+    version: 2,
     accounts: [
-      {id:uid(), name:'Fondo S&P 500', entity:'MyInvestor', type:'indexado', bucket:'largo', balance:5320, rate:7, invested:null},
-      {id:uid(), name:'Fondo monetario EUR', entity:'MyInvestor', type:'monetario', bucket:'casa', balance:1628, rate:2, invested:null},
+      {id:uid(), name:'Fondo S&P 500', entity:'MyInvestor', type:'indexado', bucket:'largo', balance:5320, rate:7, invested:null, isin:'IE00BYX5MX67', units:null},
+      {id:uid(), name:'Fondo monetario EUR', entity:'MyInvestor', type:'monetario', bucket:'casa', balance:1628, rate:2, invested:null, isin:'LU0128495834', units:null},
       {id:uid(), name:'Cuenta remunerada', entity:'Trade Republic', type:'remunerada', bucket:'casa', balance:6017, rate:2.5, invested:null},
       {id:uid(), name:'Cuenta corriente', entity:'BBVA', type:'corriente', bucket:'operativo', balance:5100, rate:0, invested:null}
     ],
@@ -271,8 +271,17 @@ function normalize(s) {
   out.accounts = out.accounts.map(a => ({
     id: a.id || uid(), name: a.name || 'Cuenta', entity: a.entity || '', type: TYPES[a.type] ? a.type : 'otro',
     bucket: BUCKETS[a.bucket] ? a.bucket : 'operativo', balance: fin(+a.balance), rate: fin(+a.rate),
-    invested: (a.invested === null || a.invested === '' || a.invested === undefined) ? null : fin(+a.invested)
+    invested: (a.invested === null || a.invested === '' || a.invested === undefined) ? null : fin(+a.invested),
+    isin: a.isin ? String(a.isin).trim().toUpperCase() : null,
+    units: (a.units === null || a.units === '' || a.units === undefined) ? null : fin(+a.units)
   }));
+  if (!s.version || s.version < 2) {
+    for (const a of out.accounts) {
+      if (!a.isin && a.entity === 'MyInvestor' && a.type === 'indexado' && /s&p/i.test(a.name)) a.isin = 'IE00BYX5MX67';
+      if (!a.isin && a.entity === 'MyInvestor' && a.type === 'monetario') a.isin = 'LU0128495834';
+    }
+    out.version = 2;
+  }
   return out;
 }
 function load() {
@@ -282,6 +291,51 @@ function load() {
 let S = load();
 function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} }
 save();
+
+/* ---------- valores liquidativos (navs.json, lo actualiza una GitHub Action) ---------- */
+const NAV_KEY = 'patrimonio.navs';
+const NAV_URLS = ['https://raw.githubusercontent.com/agusmltkd/Patrimonio/main/navs.json', './navs.json'];
+let NAV = (() => { try { return JSON.parse(localStorage.getItem(NAV_KEY)) || null; } catch (e) { return null; } })();
+const round2 = n => Math.round(n * 100) / 100;
+function fundHist(isin) { return (NAV && NAV.funds && NAV.funds[isin] && Array.isArray(NAV.funds[isin].history)) ? NAV.funds[isin].history : []; }
+function navOf(isin) {
+  const h = fundHist(isin); if (!h.length) return null;
+  const [date, nav] = h[h.length - 1]; const prev = h.length > 1 ? h[h.length - 2][1] : null;
+  return {date, nav, prev, change: prev ? (nav / prev - 1) * 100 : null, name: NAV.funds[isin].name || ''};
+}
+function navAt(isin, date) {
+  const h = fundHist(isin); if (!h.length) return null;
+  let best = null;
+  for (const [d, v] of h) { if (d <= date) best = [d, v]; else { if (!best) best = [d, v]; break; } }
+  return best;
+}
+function applyNavs() {
+  let changed = false;
+  for (const a of S.accounts) {
+    if (!a.isin || !(a.units > 0)) continue;
+    const n = navOf(a.isin); if (!n) continue;
+    const v = round2(a.units * n.nav);
+    if (v !== a.balance) { a.balance = v; changed = true; }
+  }
+  return changed;
+}
+async function loadNavs() {
+  for (const url of NAV_URLS) {
+    try {
+      const r = await fetch(url + '?t=' + Date.now(), {cache: 'no-store'});
+      if (!r.ok) continue;
+      const j = await r.json();
+      if (!j || !j.funds) continue;
+      if (NAV && NAV.updated && j.updated && j.updated < NAV.updated) return;
+      NAV = j;
+      try { localStorage.setItem(NAV_KEY, JSON.stringify(j)); } catch (e) {}
+      applyNavs(); save();
+      if (!document.querySelector('#modal:not(.hidden)') && !document.activeElement?.dataset?.bind) render();
+      return;
+    } catch (e) {}
+  }
+}
+if (applyNavs()) save();
 
 const getPath = p => p.split('.').reduce((o, k) => o?.[k], S);
 const setPath = (p, v) => { const ks = p.split('.'); const last = ks.pop(); ks.reduce((o, k) => o[k], S)[last] = v; };
@@ -356,11 +410,11 @@ const etaShort = eta => eta === null ? '+30 años' : eta === 0 ? 'Ya' : addMonth
 const etaLong = eta => eta === null ? 'Más de 30 años con este ritmo' : eta === 0 ? 'Ya tienes lo necesario' : `${monthLabel(addMonths(eta))} · en ${durText(eta)}`;
 
 /* ---------- gráfico SVG ---------- */
-function lineChart({labels, series, hline, height = 210, nowIndex}) {
+function lineChart({labels, series, hline, height = 210, nowIndex, zero = true}) {
   const W = 360, H = height, L = 32, R = 6, T = 16, B = 22;
   const all = series.flatMap(s => s.values); if (hline) all.push(hline.value);
-  let max = Math.max(1, ...all), min = Math.min(0, ...all);
-  max += (max - min) * 0.07;
+  let max = zero ? Math.max(1, ...all) : Math.max(...all), min = zero ? Math.min(0, ...all) : Math.min(...all);
+  if (!zero) { const pad = (max - min) * 0.12 || Math.abs(max) * 0.01 || 1; min -= pad; max += pad; } else max += (max - min) * 0.07;
   const n = labels.length;
   const x = i => L + (n <= 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1));
   const y = v => T + (H - T - B) * (1 - (v - min) / (max - min));
@@ -501,6 +555,33 @@ function viewResumen() {
   <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>`;
 }
 
+function fundsCard() {
+  const funds = S.accounts.filter(a => a.isin);
+  if (!funds.length) return '';
+  const upd = NAV && NAV.updated ? new Date(NAV.updated).toLocaleString('es-ES', {day:'numeric', month:'short', hour:'2-digit', minute:'2-digit'}) : null;
+  const body = funds.map(a => {
+    const h = fundHist(a.isin); const n = navOf(a.isin);
+    if (!h.length) return `<div style="padding:8px 0"><b>${esc(a.name)}</b><p class="empty" style="margin:4px 0 0">Todavía no hay precios para ${esc(a.isin)}. Se cargarán cuando se ejecute la actualización diaria.</p></div>`;
+    const from = new Date(); from.setFullYear(from.getFullYear() - 1);
+    const fromISO = `${from.getFullYear()}-${pad(from.getMonth()+1)}-${pad(from.getDate())}`;
+    let pts = h.filter(([d]) => d >= fromISO); if (pts.length < 2) pts = h.slice(-60);
+    const stepN = Math.max(1, Math.floor(pts.length / 90));
+    pts = pts.filter((_, i) => i % stepN === 0 || i === pts.length - 1);
+    const yr = pts.length > 1 ? (pts[pts.length - 1][1] / pts[0][1] - 1) * 100 : null;
+    const color = a.bucket === 'largo' ? 'var(--b-largo)' : 'var(--b-casa)';
+    return `<div style="padding:10px 0;border-top:1px solid var(--line)">
+      <div class="row"><span><b>${esc(a.name)}</b><div class="meta small muted">${esc(n.name || a.isin)}</div></span>
+      <span class="r"><b class="num">${n.nav.toLocaleString('es-ES', {maximumFractionDigits:4})} €</b>${yr != null ? `<div class="small ${yr >= 0 ? 'up' : 'down'}">${yr >= 0 ? '+' : ''}${pct(yr)} ${pts.length > 200 ? 'en un año' : 'en el periodo'}</div>` : ''}</span></div>
+      ${lineChart({labels: pts.map(([d]) => new Date(d + 'T12:00:00').toLocaleDateString('es-ES', {month:'short', year:'2-digit'}).replace('.', '')), series: [{name:'Valor liquidativo', color, values: pts.map(p => p[1])}], height: 150, zero: false}).replace(/<div class="legend">.*<\/div>$/, '')}
+    </div>`;
+  }).join('');
+  return `<section class="card">
+    <h2><span class="em">📉</span>Tus fondos</h2>
+    <p class="help">El precio (valor liquidativo) se actualiza solo cada día laborable. Los fondos publican un precio al día, con 1–2 días de retraso.${upd ? ` Última actualización: ${upd}.` : ''}</p>
+    ${body}
+  </section>`;
+}
+
 function viewCuentas() {
   const b = sums(); const total = BK.reduce((s, k) => s + b[k], 0);
   const groups = BK.map(k => {
@@ -511,8 +592,21 @@ function viewCuentas() {
       <div class="small muted" style="margin-bottom:6px">${BUCKETS[k].desc}</div>
       ${acc.map(a => {
         const gain = a.invested != null && a.invested > 0 ? a.balance - a.invested : null;
+        const n = a.isin ? navOf(a.isin) : null;
+        let extra = '';
+        if (a.isin && n && a.units > 0) extra = `<div class="meta">${showNum(a.units)} part. × ${n.nav.toLocaleString('es-ES', {maximumFractionDigits:4})} € · ${dateFmt(n.date)}${n.change != null ? ` · <span class="${n.change >= 0 ? 'up' : 'down'}">${n.change >= 0 ? '+' : ''}${pct(n.change, 2)}</span>` : ''}</div>`;
+        else if (a.isin && !(a.units > 0)) extra = `<div class="meta" style="color:var(--warn)">Pon tus participaciones para que se actualice solo</div>`;
+        else if (a.isin && !n) extra = `<div class="meta">Esperando el primer precio…</div>`;
+        else if (a.type === 'remunerada' && a.rate > 0) {
+          const last = sortedSnaps().pop();
+          if (last && last.balances && last.balances[a.id] != null) {
+            const days = Math.max(0, (Date.now() - new Date(last.date + 'T12:00:00')) / 864e5);
+            const acc = last.balances[a.id] * a.rate / 100 * days / 365;
+            if (acc >= 0.5) extra = `<div class="meta up">≈ +${eur(acc, 2)} de intereses desde el ${dateFmt(last.date)}</div>`;
+          }
+        }
         return `<button class="acc" data-action="edit-acc" data-id="${a.id}">
-          <span><b>${esc(a.name)}</b><div class="meta">${esc(a.entity)}${a.entity ? ' · ' : ''}${TYPES[a.type]} · ${pct(a.rate, a.rate % 1 ? 1 : 0)}${a.type === 'indexado' ? ' esperado' : ''}</div></span>
+          <span><b>${esc(a.name)}</b><div class="meta">${esc(a.entity)}${a.entity ? ' · ' : ''}${TYPES[a.type]}${a.isin ? '' : ` · ${pct(a.rate, a.rate % 1 ? 1 : 0)}`}</div>${extra}</span>
           <span class="r"><b class="num">${eur(a.balance, 0)}</b>${gain !== null ? `<div class="meta ${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : ''}${eur(gain)} (${pct(gain / a.invested * 100)})</div>` : ''}</span>
         </button>`;
       }).join('')}
@@ -530,6 +624,7 @@ function viewCuentas() {
     <span class="note">Una vez al mes, pulsa <b>Actualizar saldos</b> y pon lo que tienes en cada cuenta. Así la app sabe cómo vas. Toca una cuenta para editarla o cambiarla de hucha.</span>
   </section>
   ${groups || '<p class="empty">No tienes cuentas. Añade la primera.</p>'}
+  ${fundsCard()}
   <section class="card">
     <h2><span class="em">🗓️</span>Revisiones mensuales</h2>
     ${snaps.length ? snaps.map(s => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span>${dateFmt(s.date)}</span><span><b class="num">${eur(s.total)}</b> <button class="x" data-action="del-snap" data-date="${s.date}" aria-label="Borrar foto">×</button></span></div>`).join('') : '<p class="empty">Aún no has hecho ninguna revisión.</p>'}
@@ -751,14 +846,36 @@ function accForm(a) {
       ${txtField('Saldo (€)', 'f-balance', a.balance, 'number', 'inputmode="decimal" step="any"')}
       ${txtField('Interés anual (%)', 'f-rate', a.rate, 'number', 'inputmode="decimal" step="any"')}
     </div>
+    <div class="grid2">
+      ${txtField('ISIN (solo fondos)', 'f-isin', a.isin || '', 'text', 'placeholder="Ej. IE00BYX5MX67" autocapitalize="characters" spellcheck="false"')}
+      ${txtField('Participaciones', 'f-units', a.units ?? '', 'number', 'placeholder="Ej. 123,4567"')}
+    </div>
+    <p class="help" style="margin-top:-4px">Si pones ISIN y participaciones, el saldo se calcula solo con el precio de cada día.</p>
     ${txtField('Dinero que has metido en total (€) · opcional', 'f-invested', a.invested ?? '', 'number', 'inputmode="decimal" step="any" placeholder="Solo en inversiones, para ver cuánto ganas"')}
     <div class="btnrow"><button class="btn" data-action="save-acc" data-id="${a.id || ''}">Guardar</button><button class="btn ghost" data-action="close">Cancelar</button></div>
+    ${!isNew && a.isin ? `<div class="btnrow"><button class="btn ghost block" data-action="buy" data-id="${a.id}">➕ Registrar una compra</button></div>` : ''}
     ${isNew ? '' : `<div class="btnrow"><button class="btn danger block" data-action="del-acc" data-id="${a.id}">Eliminar cuenta</button></div>`}`);
+}
+function buyForm(a) {
+  const n = navOf(a.isin);
+  openModal(`<h2>Compra de ${esc(a.name)}</h2>
+    <p class="help">Pon cuánto has invertido y el día. La app calcula las participaciones con el precio de ese día${n ? '' : ' (todavía no hay precios: luego podrás corregirlas a mano)'}.</p>
+    <div class="grid2">${txtField('Importe (€)', 'b-amount', S.plan.spMonthly && a.type === 'indexado' ? S.plan.spMonthly : '', 'number')}${txtField('Fecha', 'b-date', todayISO(), 'date')}</div>
+    <p class="help" id="b-preview"></p>
+    <div class="btnrow"><button class="btn" data-action="save-buy" data-id="${a.id}">Añadir compra</button><button class="btn ghost" data-action="close">Cancelar</button></div>
+    <p class="note">MyInvestor puede usar el precio de uno o dos días después de la orden. Si quieres que cuadre al céntimo, copia luego el número exacto de participaciones en la ficha de la cuenta.</p>`);
+  const prev = () => {
+    const amt = numVal('b-amount'), at = navAt(a.isin, val('b-date') || todayISO());
+    $('#b-preview').innerHTML = amt && at ? `≈ <b>${(amt / at[1]).toLocaleString('es-ES', {maximumFractionDigits:4})} participaciones</b> a ${at[1].toLocaleString('es-ES', {maximumFractionDigits:4})} € (precio del ${dateFmt(at[0])})` : '';
+  };
+  $('#b-amount').addEventListener('input', prev); $('#b-date').addEventListener('input', prev); prev();
 }
 function balForm() {
   openModal(`<h2>Revisión del mes 🗓️</h2>
     <p class="help">Abre la app de cada banco y copia el saldo que tienes ahora. Si una cuenta no ha cambiado, déjala como está.</p>
-    ${S.accounts.map(a => txtField(`${esc(a.name)} <span class="muted">· ${esc(a.entity)}</span>`, 'bal-' + a.id, a.balance, 'number', 'inputmode="decimal" step="any"')).join('')}
+    ${S.accounts.map(a => a.isin && a.units > 0 && navOf(a.isin)
+      ? txtField(`${esc(a.name)} <span class="muted">· participaciones (el saldo se calcula solo)</span>`, 'units-' + a.id, a.units, 'number')
+      : txtField(`${esc(a.name)} <span class="muted">· ${esc(a.entity)}</span>`, 'bal-' + a.id, a.balance, 'number')).join('')}
     ${txtField('Fecha', 'bal-date', todayISO(), 'date')}
     <div class="btnrow"><button class="btn" data-action="save-bal">Guardar revisión</button><button class="btn ghost" data-action="close">Cancelar</button></div>`);
 }
@@ -826,16 +943,28 @@ document.addEventListener('click', e => {
       const name = val('f-name').trim();
       if (!name) { document.getElementById('f-name').focus(); return; }
       const inv = numVal('f-invested');
-      const data = {name, entity: val('f-entity').trim(), type: val('f-type'), bucket: val('f-bucket'), balance: numVal('f-balance') ?? 0, rate: numVal('f-rate') ?? 0, invested: inv};
+      const isin = val('f-isin').trim().toUpperCase().replace(/\s/g, '') || null;
+      const data = {name, entity: val('f-entity').trim(), type: val('f-type'), bucket: val('f-bucket'), balance: numVal('f-balance') ?? 0, rate: numVal('f-rate') ?? 0, invested: inv, isin, units: isin ? numVal('f-units') : null};
       if (id) Object.assign(S.accounts.find(a => a.id === id), data); else S.accounts.push({id: uid(), ...data});
-      closeModal(); commit(); break;
+      applyNavs(); closeModal(); commit(); break;
     }
     case 'del-acc':
       if (confirm('¿Eliminar esta cuenta? Las revisiones anteriores no se pierden.')) { S.accounts = S.accounts.filter(a => a.id !== id); closeModal(); commit(); }
       break;
+    case 'buy': buyForm(S.accounts.find(a => a.id === id)); break;
+    case 'save-buy': {
+      const a = S.accounts.find(x => x.id === id); const amt = numVal('b-amount');
+      if (!a || !amt) { document.getElementById('b-amount')?.focus(); return; }
+      const at = navAt(a.isin, val('b-date') || todayISO());
+      if (at) a.units = Math.round(((a.units || 0) + amt / at[1]) * 10000) / 10000;
+      else a.balance = round2(a.balance + amt);
+      if (a.invested != null) a.invested = round2(a.invested + amt);
+      applyNavs(); closeModal(); commit(); break;
+    }
     case 'update-bal': balForm(); break;
     case 'save-bal': {
-      for (const a of S.accounts) { const v = numVal('bal-' + a.id); if (v !== null) a.balance = v; }
+      for (const a of S.accounts) { const u = numVal('units-' + a.id); if (u !== null) a.units = u; const v = numVal('bal-' + a.id); if (v !== null) a.balance = v; }
+      applyNavs();
       const date = val('bal-date') || todayISO();
       S.snapshots = S.snapshots.filter(s => s.date !== date);
       S.snapshots.push(makeSnapshot(S, date));
@@ -912,6 +1041,8 @@ $('#importFile').addEventListener('change', e => {
 });
 
 render();
+loadNavs();
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadNavs(); });
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });

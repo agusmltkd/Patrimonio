@@ -1,0 +1,39 @@
+name: Actualizar valores liquidativos
+
+on:
+  schedule:
+    - cron: "37 6 * * 1-6"   # por la mañana (hora UTC), recoge el precio del día anterior
+    - cron: "47 19 * * 1-5"  # por la tarde, por si ya se ha publicado el del día
+  workflow_dispatch:          # botón "Run workflow" para lanzarlo a mano
+
+permissions:
+  contents: write
+
+concurrency:
+  group: navs
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Descargar precios
+        run: python scripts/update_navs.py
+
+      - name: Guardar cambios
+        run: |
+          if git diff --quiet -- navs.json && git ls-files --error-unmatch navs.json >/dev/null 2>&1; then
+            echo "Sin precios nuevos"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add navs.json
+          git commit -m "Valores liquidativos $(date -u +%F)"
+          git push
