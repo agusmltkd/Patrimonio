@@ -156,6 +156,30 @@ nav.tabs svg{width:23px;height:23px}
 .welcome li{margin:4px 0}
 .help{font-size:13.5px;color:var(--muted);margin:-4px 0 10px}
 table.cmp td{white-space:nowrap}
+:root{--b-gastos:#c2410c}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--b-gastos:#f08a4b}}
+:root[data-theme="dark"]{--b-gastos:#f08a4b}
+.split-bar{position:relative;height:46px;display:flex;margin:22px 4px 16px;touch-action:none;user-select:none;-webkit-user-select:none}
+.split-bar .seg{height:100%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;overflow:hidden;white-space:nowrap;transition:width .05s}
+.split-bar .seg:first-child{border-radius:12px 0 0 12px}
+.split-bar .seg:nth-child(3){border-radius:0 12px 12px 0}
+.split-bar .hdl{position:absolute;top:50%;width:30px;height:30px;margin:-15px 0 0 -15px;border-radius:50%;background:var(--card);border:3px solid var(--text);box-shadow:0 2px 8px rgba(0,0,0,.25);cursor:ew-resize;touch-action:none;padding:0;z-index:2}
+.split-bar .hdl::before{content:"";position:absolute;inset:-12px}
+.split-bar .hdl::after{content:"";position:absolute;left:50%;top:50%;width:2px;height:10px;margin:-5px 0 0 -1px;background:var(--text);border-radius:1px}
+.split-bar .hdl:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.legend-row{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:center;padding:6px 0}
+.legend-row i{width:14px;height:14px;border-radius:4px}
+.legend-row small{display:block;color:var(--muted);font-size:12.5px}
+.mnav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.mnav h2{margin:0;font-size:19px;text-transform:capitalize}
+.mnav .iconbtn{width:36px;height:36px}
+.delta-big{font-size:30px;font-weight:750;letter-spacing:-.02em}
+#lock{position:fixed;inset:0;z-index:50;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center}
+body.locked #lock{display:flex}
+body.locked main,body.locked header.top,body.locked nav.tabs,body.locked #modal{visibility:hidden}
+#lock .logo{width:72px;height:72px;border-radius:18px;background:linear-gradient(145deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-size:34px}
+#lock .pin{width:180px;text-align:center;font-size:24px;letter-spacing:.4em;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);color:var(--text)}
+#lock .err{color:var(--bad);font-size:14px;min-height:18px}
 .disclaimer{font-size:12px;color:var(--muted);text-align:center;margin:16px 4px 0}
 .split{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 </style>
@@ -174,6 +198,17 @@ table.cmp td{white-space:nowrap}
   <button data-tab="extras"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/></svg>Extras</button>
 </nav>
 <div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="sheet" id="sheet"></div></div>
+<div id="lock" aria-live="polite">
+  <div class="logo">🔒</div>
+  <h2 style="margin:0">Patrimonio</h2>
+  <p class="muted" style="margin:0">Desbloquea para ver tus datos</p>
+  <button class="btn" id="lock-bio" style="min-width:220px">Desbloquear con Face ID</button>
+  <div style="display:flex;flex-direction:column;gap:8px;align-items:center;margin-top:6px">
+    <input class="pin" id="lock-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="PIN" autocomplete="off" aria-label="PIN">
+    <button class="btn ghost" id="lock-pin-go">Entrar con PIN</button>
+  </div>
+  <div class="err" id="lock-err"></div>
+</div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
 
 <script>
@@ -485,6 +520,83 @@ function buildAlerts(b, sim) {
   return out;
 }
 const alertHTML = a => `<div class="alert ${a.t}"><span class="ic">${a.ic}</span><div class="bd">${a.h}${a.btn ? `<div><button class="go" data-action="${a.btn[1].startsWith('goto:') ? 'goto' : a.btn[1]}" data-v="${a.btn[1].replace('goto:', '')}">${a.btn[0]} →</button></div>` : ''}</div></div>`;
+const MONTHS = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const monthName = k => { const [y, m] = k.split('-').map(Number); return `${MONTHS[m - 1]} ${y}`; };
+function monthEnds() { const m = {}; for (const s of sortedSnaps()) m[s.date.slice(0, 7)] = s; return m; }
+function reportKeys() {
+  const keys = Object.keys(monthEnds()); const cur = todayISO().slice(0, 7);
+  if (!keys.includes(cur)) keys.push(cur);
+  return keys.sort().filter(k => buildReport(k));
+}
+function buildReport(key) {
+  const ends = monthEnds(), cur = todayISO().slice(0, 7);
+  const snaps = sortedSnaps();
+  const end = key === cur ? makeSnapshot(S, todayISO()) : ends[key];
+  if (!end) return null;
+  const prevKey = Object.keys(ends).sort().filter(k => k < key).pop();
+  let start = prevKey ? ends[prevKey] : snaps.find(s => s.date.slice(0, 7) === key && s.date < end.date);
+  if (!start || start.date >= end.date) return null;
+  const days = (new Date(end.date + 'T12:00:00') - new Date(start.date + 'T12:00:00')) / 864e5;
+  let market = 0, interest = 0, bought = 0;
+  for (const a of S.accounts) {
+    const sb = start.balances?.[a.id];
+    if (a.isin) {
+      const n0 = navAt(a.isin, start.date), n1 = navAt(a.isin, end.date);
+      if (n0 && n1 && sb != null) market += sb * (n1[1] / n0[1] - 1);
+      for (const l of (a.lots || [])) if (l.date > start.date && l.date <= end.date) { bought += l.amount; if (n1) market += l.units * n1[1] - l.amount; }
+    } else if (sb != null && a.rate > 0) interest += sb * a.rate / 100 * days / 365;
+  }
+  const delta = end.total - start.total;
+  const saved = delta - market - interest;
+  const extraInc = S.income.filter(i => i.date > start.date && i.date <= end.date).reduce((s, i) => s + fin(i.amount), 0);
+  const byB = {}; for (const k of BK) byB[k] = (end.byBucket?.[k] || 0) - (start.byBucket?.[k] || 0);
+  return {key, start, end, days, delta, deltaPct: start.total ? delta / start.total * 100 : 0, market, interest, saved, bought, extraInc, byB, live: key === cur};
+}
+function reportCard() {
+  const keys = reportKeys();
+  if (!keys.length) return `<section class="card"><h2><span class="em">📋</span>Resumen del mes</h2><p class="empty">Tu primer resumen estará listo cuando hagas la revisión del mes que viene. Ahí verás cuánto has ahorrado, cuánto te ha dado el mercado y cómo ha cambiado cada hucha.</p></section>`;
+  const r = buildReport(keys[keys.length - 1]);
+  const up = r.delta >= 0;
+  return `<section class="card">
+    <h2><span class="em">📋</span>Resumen de ${monthName(r.key)}${r.live ? ' (hasta hoy)' : ''}</h2>
+    <div class="delta-big num ${up ? 'up' : 'down'}">${up ? '+' : ''}${eur(r.delta)}</div>
+    <p class="small muted" style="margin:2px 0 10px">Has ahorrado unos <b>${eur(r.saved)}</b> y el mercado te ha dado <b>${r.market >= 0 ? '+' : ''}${eur(r.market)}</b>.</p>
+    <button class="btn ghost block" data-action="report" data-v="${r.key}">Ver el resumen completo</button>
+  </section>`;
+}
+function reportForm(key) {
+  const keys = reportKeys(); const i = keys.indexOf(key);
+  const r = buildReport(key); if (!r) return;
+  const prev = i > 0 ? buildReport(keys[i - 1]) : null;
+  const up = r.delta >= 0;
+  const sal = fin(+S.plan.salary), m = +key.slice(5);
+  const nom = sal * ((+S.plan.extraPays >= 2 && (m === 6 || m === 12)) || (+S.plan.extraPays === 1 && m === 12) ? 2 : 1);
+  const rate = nom && r.days > 20 && r.days < 45 ? r.saved / nom * 100 : null;
+  const msg = r.saved >= nom * 0.7 ? '¡Mes buenísimo! Has ahorrado casi toda la nómina. 🚀' : r.saved > 0 ? 'Buen mes: has seguido sumando. 👏' : 'Este mes has gastado más de lo que entró. Nada grave si es puntual. 💪';
+  const bRows = BK.map(k => `<div class="row" style="padding:6px 0"><span><span class="em">${BUCKETS[k].em}</span> ${BUCKETS[k].label}</span><span class="num ${r.byB[k] > 0 ? 'up' : r.byB[k] < 0 ? 'down' : 'muted'}">${r.byB[k] > 0 ? '+' : ''}${eur(r.byB[k])}</span></div>`).join('');
+  const cmp = prev ? (() => { const d = r.saved - prev.saved; return `<p class="small" style="margin:10px 0 0">Comparado con ${MONTHS[+prev.key.slice(5) - 1]}: ${Math.abs(d) < 20 ? 'has ahorrado lo mismo, más o menos.' : `has ahorrado <b class="${d > 0 ? 'up' : 'down'}">${eur(Math.abs(d))} ${d > 0 ? 'más' : 'menos'}</b>.`}</p>`; })() : '';
+  openModal(`<div class="mnav">
+      <button class="iconbtn" data-action="report" data-v="${keys[i - 1] || ''}" ${i > 0 ? '' : 'disabled style="opacity:.3"'} aria-label="Mes anterior">‹</button>
+      <h2>${monthName(r.key)}</h2>
+      <button class="iconbtn" data-action="report" data-v="${keys[i + 1] || ''}" ${i < keys.length - 1 ? '' : 'disabled style="opacity:.3"'} aria-label="Mes siguiente">›</button>
+    </div>
+    <p class="help">Del ${dateFmt(r.start.date)} al ${dateFmt(r.end.date)}${r.live ? ' (hoy)' : ''}.</p>
+    <p class="small muted" style="margin:0">Tu dinero ha cambiado</p>
+    <div class="delta-big num ${up ? 'up' : 'down'}">${up ? '+' : ''}${eur(r.delta)} <span class="small">(${up ? '+' : ''}${pct(r.deltaPct)})</span></div>
+    <p style="margin:6px 0 12px">${msg}</p>
+    <div class="kpis">
+      <div class="kpi"><b class="num">${eur(r.saved)}</b><span>Has ahorrado tú${rate != null ? ` · ${pct(rate, 0)} de la nómina` : ''}</span></div>
+      <div class="kpi"><b class="num ${r.market >= 0 ? 'up' : 'down'}">${r.market >= 0 ? '+' : ''}${eur(r.market)}</b><span>Te ha dado el mercado</span></div>
+      <div class="kpi"><b class="num">${eur(r.interest)}</b><span>Intereses (aprox.)</span></div>
+      <div class="kpi"><b class="num">${eur(r.bought)}</b><span>Invertido en fondos</span></div>
+    </div>
+    ${r.extraInc ? `<p class="small" style="margin:10px 0 0">⚡ Ingresos extra: <b class="up">+${eur(r.extraInc)}</b></p>` : ''}
+    ${cmp}
+    <h3 style="margin:16px 0 4px">Cómo ha cambiado cada hucha</h3>
+    ${bRows}
+    <p class="note">"Has ahorrado" se calcula restando al cambio total lo que han ganado o perdido tus fondos y los intereses estimados. Es una aproximación.</p>
+    <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
 function greeting() {
   const h = new Date().getHours();
   const g = h < 14 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches';
@@ -554,6 +666,7 @@ function viewResumen() {
       <div class="kpi"><b class="num">${eur(expRet)}</b><span>Lo que se espera de la inversión (puede variar)</span></div>
     </div>
   </section>
+  ${reportCard()}
   <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>`;
 }
 
@@ -778,8 +891,136 @@ function spCard() {
   </section>`;
 }
 
+let dragging = false;
+function repartoData() {
+  const p = S.plan, sal = Math.max(1, fin(+p.salary));
+  const exp = Math.min(fin(+p.expenses), sal), sp = Math.min(fin(+p.spMonthly), Math.max(0, sal - exp));
+  const rest = sal - fin(+p.expenses) - fin(+p.spMonthly);
+  return {sal, exp, sp, rest, casa: Math.max(0, rest), over: rest < 0};
+}
+function updateReparto() {
+  const bar = $('#rbar'); if (!bar) return;
+  const d = repartoData(), P = v => v / d.sal * 100;
+  const segs = [['rs-exp', d.exp], ['rs-sp', d.sp], ['rs-casa', d.casa]];
+  for (const [id, v] of segs) { const el = $('#' + id); el.style.width = P(v) + '%'; el.textContent = ''; }
+  $('#rh1').style.left = P(d.exp) + '%';
+  $('#rh2').style.left = P(d.exp + d.sp) + '%';
+  $('#rh1').setAttribute('aria-valuetext', eur(d.exp)); $('#rh2').setAttribute('aria-valuetext', eur(d.sp));
+  const emerg = sums().emergencia < S.plan.emergencyTarget;
+  const p = S.plan, extra = fin(+p.extraPays) * fin(+p.salary);
+  $('#rlegend').innerHTML = `
+    <div class="legend-row"><i style="background:var(--b-gastos)"></i><span>Para vivir<small>Gastos, ocio, caprichos</small></span><b class="num">${eur(d.exp)}<small style="text-align:right">${pct(P(d.exp), 0)}</small></b></div>
+    <div class="legend-row"><i style="background:var(--b-largo)"></i><span>S&P 500<small>Inversión a largo plazo</small></span><b class="num">${eur(d.sp)}<small style="text-align:right">${pct(P(d.sp), 0)}</small></b></div>
+    <div class="legend-row"><i style="background:var(--b-casa)"></i><span>${emerg ? 'Colchón y casa' : 'Para la casa'}<small>${emerg ? 'Primero completa el colchón, luego a la casa' : 'Ahorro para la entrada'}</small></span><b class="num">${eur(d.casa)}<small style="text-align:right">${pct(P(d.casa), 0)}</small></b></div>`;
+  $('#rnote').innerHTML = d.over
+    ? `⚠️ Te estás pasando <b>${eur(-d.rest)}</b> de tu nómina: ese dinero saldría de lo ahorrado para la casa.`
+    : `Ahorras <b>${pct((d.sp + d.casa) / d.sal * 100, 0)}</b> de tu nómina.${extra ? ` Además, las pagas extra (${eur(extra)} al año) van enteras a la casa.` : ''}`;
+}
+function initReparto() {
+  const bar = $('#rbar'); if (!bar) return;
+  let raf = 0;
+  const live = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; if (refresh) refresh(); syncBinds(); }); };
+  const setFrom = (which, x) => {
+    const sal = fin(+S.plan.salary); const v = Math.round(Math.min(1, Math.max(0, x)) * sal / 10) * 10;
+    if (which === 1) S.plan.expenses = Math.min(Math.max(0, v), Math.max(0, sal - S.plan.spMonthly));
+    else S.plan.spMonthly = Math.min(Math.max(0, v - S.plan.expenses), Math.max(0, sal - S.plan.expenses));
+    updateReparto(); live();
+  };
+  [[$('#rh1'), 1], [$('#rh2'), 2]].forEach(([h, which]) => {
+    h.addEventListener('pointerdown', e => {
+      e.preventDefault(); h.setPointerCapture(e.pointerId); dragging = true;
+      const move = ev => { const r = bar.getBoundingClientRect(); setFrom(which, (ev.clientX - r.left) / r.width); };
+      const up = () => { h.removeEventListener('pointermove', move); h.removeEventListener('pointerup', up); h.removeEventListener('pointercancel', up); dragging = false; save(); if (refresh) refresh(); syncBinds(); };
+      h.addEventListener('pointermove', move); h.addEventListener('pointerup', up); h.addEventListener('pointercancel', up);
+    });
+    h.addEventListener('keydown', e => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return; e.preventDefault();
+      const d = e.key === 'ArrowRight' ? 10 : -10;
+      if (which === 1) S.plan.expenses = Math.max(0, Math.min(S.plan.salary - S.plan.spMonthly, S.plan.expenses + d));
+      else S.plan.spMonthly = Math.max(0, Math.min(S.plan.salary - S.plan.expenses, S.plan.spMonthly + d));
+      save(); updateReparto(); if (refresh) refresh(); syncBinds();
+    });
+  });
+  updateReparto();
+}
+let afterRender = null;
+
+/* ---------- bloqueo con Face ID / PIN ---------- */
+const LOCK_KEY = 'patrimonio.lock';
+const getLock = () => { try { return JSON.parse(localStorage.getItem(LOCK_KEY)) || null; } catch (e) { return null; } };
+const setLock = v => { try { v ? localStorage.setItem(LOCK_KEY, JSON.stringify(v)) : localStorage.removeItem(LOCK_KEY); } catch (e) {} };
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64 = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+async function sha(t) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('patrimonio:' + t)); return b64(d); }
+const bioAvailable = async () => { try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { return false; } };
+async function bioRegister() {
+  const cred = await navigator.credentials.create({publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: {name: 'Patrimonio'},
+    user: {id: crypto.getRandomValues(new Uint8Array(16)), name: 'Patrimonio', displayName: 'Patrimonio'},
+    pubKeyCredParams: [{type: 'public-key', alg: -7}, {type: 'public-key', alg: -257}],
+    authenticatorSelection: {authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged'}, timeout: 60000}});
+  return b64(cred.rawId);
+}
+async function bioCheck(id) {
+  await navigator.credentials.get({publicKey: {challenge: crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials: [{type: 'public-key', id: unb64(id), transports: ['internal', 'hybrid']}], userVerification: 'required', timeout: 60000}});
+  return true;
+}
+let hiddenAt = 0;
+function lockNow() {
+  const L = getLock(); if (!L) return;
+  document.body.classList.add('locked'); closeModal();
+  $('#lock-bio').style.display = L.credId ? '' : 'none';
+  $('#lock-err').textContent = ''; $('#lock-pin').value = '';
+}
+function unlock() { document.body.classList.remove('locked'); hiddenAt = 0; }
+async function tryBio() {
+  const L = getLock(); if (!L?.credId) return;
+  try { await bioCheck(L.credId); unlock(); } catch (e) { $('#lock-err').textContent = 'No se pudo verificar. Prueba otra vez o usa el PIN.'; }
+}
+async function tryPin() {
+  const L = getLock(); const v = $('#lock-pin').value.trim(); if (!v) return;
+  if (await sha(v) === L.pinHash) unlock(); else { $('#lock-err').textContent = 'PIN incorrecto'; $('#lock-pin').value = ''; }
+}
+$('#lock-bio').addEventListener('click', tryBio);
+$('#lock-pin-go').addEventListener('click', tryPin);
+$('#lock-pin').addEventListener('keydown', e => { if (e.key === 'Enter') tryPin(); });
+document.addEventListener('visibilitychange', () => {
+  const L = getLock(); if (!L) return;
+  if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+  else if (hiddenAt && Date.now() - hiddenAt > (L.minutes ?? 1) * 60000 && !document.body.classList.contains('locked')) { lockNow(); if (L.credId) tryBio(); }
+});
+function lockForm() {
+  const L = getLock();
+  openModal(`<h2>🔒 Bloqueo</h2>
+    <p class="help">Pide Face ID (o tu PIN) para abrir la app. Es para que nadie curiosee si coge tu móvil desbloqueado; los datos siguen guardados en este móvil.</p>
+    ${L ? `<p>✅ Activado${L.credId ? ' con Face ID y PIN' : ' con PIN'}.</p>
+      <label class="field"><span>Bloquear al volver a la app después de</span><div class="inp"><select id="lk-min">${opts({'0':'Siempre', '1':'1 minuto', '5':'5 minutos', '15':'15 minutos', '60':'1 hora'}, String(L.minutes ?? 1))}</select></div></label>
+      <div class="btnrow"><button class="btn ghost block" data-action="lock-test">Probar ahora</button></div>
+      <div class="btnrow"><button class="btn danger block" data-action="lock-off">Desactivar bloqueo</button></div>`
+    : `<p class="help">Primero elige un PIN de 4 a 8 números, por si Face ID falla.</p>
+      ${txtField('PIN', 'lk-pin', '', 'password', 'inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off"')}
+      ${txtField('Repite el PIN', 'lk-pin2', '', 'password', 'inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off"')}
+      <p class="err small" id="lk-err" style="color:var(--bad)"></p>
+      <button class="btn block" data-action="lock-on">Activar bloqueo</button>`}
+    <div class="btnrow"><button class="btn ghost block" data-action="settings">Volver a ajustes</button></div>`);
+  $('#lk-min')?.addEventListener('change', e => { const L2 = getLock(); L2.minutes = +e.target.value; setLock(L2); });
+}
+async function lockOn() {
+  const a = val('lk-pin').trim(), b = val('lk-pin2').trim();
+  if (!/^\d{4,8}$/.test(a)) { $('#lk-err').textContent = 'El PIN debe tener entre 4 y 8 números.'; return; }
+  if (a !== b) { $('#lk-err').textContent = 'Los PIN no coinciden.'; return; }
+  const L = {pinHash: await sha(a), minutes: 1, credId: null};
+  if (await bioAvailable()) {
+    try { L.credId = await bioRegister(); } catch (e) { $('#lk-err').textContent = 'No se pudo activar Face ID; quedará solo con PIN.'; }
+  }
+  setLock(L); lockForm();
+}
+
 function viewPlan() {
+  afterRender = initReparto;
   refresh = () => {
+    updateReparto();
     const p = S.plan;
     const ex = fin(+p.extraPays);
     const side = p.includeSide ? sideAvg() : 0;
@@ -835,6 +1076,16 @@ function viewPlan() {
     </section>`;
   };
   return `
+  <section class="card" id="reparto">
+    <h2><span class="em">🧁</span>Cómo repartes tu nómina</h2>
+    <p class="help">Arrastra los dos círculos para decidir cuánto va a cada sitio. Todo lo demás se recalcula al momento.</p>
+    <div class="split-bar" id="rbar">
+      <div class="seg" id="rs-exp" style="background:var(--b-gastos)"></div><div class="seg" id="rs-sp" style="background:var(--b-largo)"></div><div class="seg" id="rs-casa" style="background:var(--b-casa)"></div>
+      <button class="hdl" id="rh1" role="slider" aria-label="Límite entre gastos y S&P 500"></button><button class="hdl" id="rh2" role="slider" aria-label="Límite entre S&P 500 y casa"></button>
+    </div>
+    <div id="rlegend"></div>
+    <p class="note" id="rnote"></p>
+  </section>
   <div id="results"></div>
   <section class="card">
     <h2><span class="em">💶</span>Tu sueldo y tus gastos</h2>
@@ -898,10 +1149,11 @@ function viewExtras() {
 
 const VIEWS = {resumen: viewResumen, cuentas: viewCuentas, casa: viewCasa, plan: viewPlan, extras: viewExtras};
 function render() {
-  refresh = null;
+  refresh = null; afterRender = null;
   if (!VIEWS[tab]) tab = 'resumen';
   $('#view').innerHTML = VIEWS[tab]();
   if (refresh) refresh();
+  if (afterRender) afterRender();
   document.querySelectorAll('#tabs button').forEach(bt => bt.classList.toggle('on', bt.dataset.tab === tab));
   const b = sums();
   $('#subtitle').textContent = new Date().toLocaleDateString('es-ES', {weekday:'long', day:'numeric', month:'long'});
@@ -1024,6 +1276,7 @@ function settingsForm() {
   openModal(`<h2>Ajustes</h2>
     ${txtField('Tu nombre (para el saludo)', 's-name', S.ui.name)}
     <label class="field"><span>Tema</span><div class="inp"><select id="s-theme">${opts({'':'Automático', light:'Claro', dark:'Oscuro'}, theme)}</select></div></label>
+    <div class="btnrow"><button class="btn ghost block" data-action="lock">🔒 Bloqueo con Face ID${getLock() ? ' · activado' : ''}</button></div>
     <h3 style="margin-top:14px">Copia de seguridad</h3>
     <p class="small muted" style="margin-top:0">Los datos se guardan solo en este dispositivo (clave <code>${KEY}</code>), así que el Hub puede copiarlos junto a tus otras PWAs.</p>
     <div class="btnrow"><button class="btn" data-action="export">Exportar JSON</button><button class="btn ghost" data-action="import">Importar JSON</button></div>
@@ -1056,6 +1309,11 @@ document.addEventListener('click', e => {
   switch (act) {
     case 'close': closeModal(); break;
     case 'sp-years': S.plan.spYears = +el.dataset.v; save(); if (refresh) refresh(); break;
+    case 'report': if (el.dataset.v) reportForm(el.dataset.v); break;
+    case 'lock': lockForm(); break;
+    case 'lock-on': lockOn(); break;
+    case 'lock-off': if (confirm('¿Desactivar el bloqueo?')) { setLock(null); lockForm(); } break;
+    case 'lock-test': lockNow(); tryBio(); break;
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
     case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
@@ -1186,7 +1444,9 @@ $('#importFile').addEventListener('change', e => {
   rd.readAsText(f);
 });
 
+if (getLock()) lockNow();
 render();
+if (getLock()?.credId) tryBio();
 loadNavs();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') loadNavs(); });
 

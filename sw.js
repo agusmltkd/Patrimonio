@@ -1,5 +1,5 @@
 // Patrimonio · service worker (red primero, caché como respaldo sin conexión)
-const CACHE = 'patrimonio-v5';
+const CACHE = 'patrimonio-v6';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
