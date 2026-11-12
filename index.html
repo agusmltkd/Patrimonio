@@ -49,7 +49,8 @@ header .sub{font-size:12px;color:var(--muted)}
 .iconbtn svg{width:20px;height:20px}
 main{max-width:720px;margin:0 auto;padding:4px 16px 24px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:0 0 12px;box-shadow:var(--shadow)}
-.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:0 0 10px;font-weight:650}
+.card h2{font-size:16px;color:var(--text);margin:0 0 10px;font-weight:700;letter-spacing:-.01em}
+.card h2 .em{margin-right:6px}
 .card h3{font-size:16px;margin:0 0 4px}
 .big{font-size:34px;font-weight:750;letter-spacing:-.025em;line-height:1.1}
 .mid{font-size:22px;font-weight:700;letter-spacing:-.015em}
@@ -63,7 +64,10 @@ main{max-width:720px;margin:0 auto;padding:4px 16px 24px}
 .dot{width:10px;height:10px;border-radius:50%;display:inline-block;margin-right:8px;vertical-align:middle}
 .progress{height:10px;background:var(--line);border-radius:99px;overflow:hidden;margin:10px 0 6px}
 .progress i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .3s}
-.alert{padding:11px 12px;border-radius:12px;margin-bottom:8px;font-size:14px;border-left:4px solid}
+.alert{display:flex;gap:10px;align-items:flex-start;padding:12px;border-radius:14px;margin-bottom:10px;font-size:14.5px;border-left:4px solid}
+.alert .ic{font-size:20px;line-height:1.2;flex:none}
+.alert .bd{flex:1;min-width:0}
+.alert .go{margin-top:8px;display:inline-block;border:0;background:var(--card);color:var(--accent-2);font:inherit;font-weight:650;font-size:13.5px;padding:7px 12px;border-radius:10px;cursor:pointer;box-shadow:var(--shadow)}
 .alert.warn{background:var(--warn-soft);border-color:var(--warn)}
 .alert.info{background:var(--accent-soft);border-color:var(--accent)}
 .alert.bad{background:var(--bad-soft);border-color:var(--bad)}
@@ -107,7 +111,7 @@ main{max-width:720px;margin:0 auto;padding:4px 16px 24px}
 .note{display:block;color:var(--muted);font-size:12.5px;margin-top:6px}
 .chart{width:100%;height:auto;display:block;overflow:visible}
 .chart .grid{stroke:var(--line);stroke-width:1}
-.chart .ax{fill:var(--muted);font-size:11px}
+.chart .ax{fill:var(--muted);font-size:10.5px}
 .chart .hl{stroke:var(--warn);stroke-dasharray:5 4;stroke-width:1.5}
 .chart .hlt{fill:var(--warn);font-weight:600}
 .chart .now{stroke:var(--muted);stroke-dasharray:2 3}
@@ -141,6 +145,17 @@ nav.tabs svg{width:23px;height:23px}
 .sheet{background:var(--card);width:100%;max-width:560px;max-height:90vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom))}
 .sheet h2{margin:0 0 14px;font-size:19px}
 @media(min-width:620px){.modal{align-items:center}.sheet{border-radius:20px}}
+.hero{background:linear-gradient(145deg,var(--accent),var(--accent-2));color:var(--on-accent);border:0}
+.hero .hello{font-size:15px;opacity:.9;margin:0 0 4px}
+.hero .msg{font-size:19px;font-weight:700;line-height:1.3;margin:0 0 12px;letter-spacing:-.01em}
+.hero .bar{height:12px;border-radius:99px;background:rgba(255,255,255,.25);overflow:hidden}
+.hero .bar i{display:block;height:100%;background:var(--on-accent);border-radius:99px}
+.hero .foot{display:flex;justify-content:space-between;font-size:13px;opacity:.9;margin-top:6px}
+.welcome{border:1px dashed var(--accent);background:var(--accent-soft)}
+.welcome ol{margin:8px 0 10px;padding-left:20px}
+.welcome li{margin:4px 0}
+.help{font-size:13.5px;color:var(--muted);margin:-4px 0 10px}
+table.cmp td{white-space:nowrap}
 .disclaimer{font-size:12px;color:var(--muted);text-align:center;margin:16px 4px 0}
 .split{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 </style>
@@ -195,10 +210,10 @@ const addMonths = n => { const d = new Date(); return new Date(d.getFullYear(), 
 
 const BK = ['operativo', 'emergencia', 'casa', 'largo'];
 const BUCKETS = {
-  operativo: {label:'Operativo', desc:'Recibos y gastos del mes'},
-  emergencia:{label:'Emergencia', desc:'Colchón para imprevistos'},
-  casa:      {label:'Casa', desc:'Entrada y gastos de la vivienda'},
-  largo:     {label:'Largo plazo', desc:'Inversión que no tocarás en 10+ años'}
+  operativo: {label:'Día a día', em:'💳', desc:'Para recibos y gastos del mes. Aquí no conviene acumular de más.'},
+  emergencia:{label:'Emergencias', em:'🛟', desc:'Tu colchón por si pasa algo: avería, paro, imprevisto.'},
+  casa:      {label:'Para la casa', em:'🏠', desc:'Entrada y gastos de la vivienda. Seguro y disponible.'},
+  largo:     {label:'Inversión', em:'📈', desc:'Dinero que no vas a tocar en 10 años o más.'}
 };
 const FALLBACK_RATE = {operativo:0, emergencia:2, casa:2, largo:7};
 const TYPES = {corriente:'Cuenta corriente', remunerada:'Cuenta remunerada', monetario:'Fondo monetario', indexado:'Fondo indexado', otro:'Otro'};
@@ -222,6 +237,7 @@ function defaults() {
     ],
     plan: {salary:1790, extraPays:2, expenses:350, spMonthly:400, emergencyTarget:4000, operatingTarget:1000, moveIdle:true, includeSide:false, horizon:10},
     house: {price:180000, downPct:20, young:true, itpYoung:3.5, itpGeneral:7, otherCosts:3000, furnish:3000, mortgageRate:3, years:30},
+    ui: {name:'Agustín', welcomeDone:false},
     snapshots: [],
     projects: [
       'Software para casetas y hermandades',
@@ -235,7 +251,7 @@ function defaults() {
     income: [],
     checklist: [
       'Dejar en el BBVA solo lo de los recibos y mover el resto',
-      'Asignar cada cuenta a una bolsa (operativo, emergencia, casa, largo plazo)',
+      'Decidir para qué es cada cuenta (día a día, emergencias, casa, inversión)',
       'Pedir simulación de hipoteca con aval ICO en 2–3 bancos',
       'Hablar en casa lo de la casa de Zufre',
       'Probar una tanda en Monteblanco'
@@ -250,6 +266,7 @@ function normalize(s) {
   const out = Object.assign({}, d, s);
   out.plan = Object.assign({}, d.plan, s.plan || {});
   out.house = Object.assign({}, d.house, s.house || {});
+  out.ui = Object.assign({}, d.ui, s.ui || {});
   for (const k of ['snapshots','projects','income','checklist']) if (!Array.isArray(out[k])) out[k] = [];
   out.accounts = out.accounts.map(a => ({
     id: a.id || uid(), name: a.name || 'Cuenta', entity: a.entity || '', type: TYPES[a.type] ? a.type : 'otro',
@@ -335,12 +352,12 @@ function simulate(over) {
   }
   return {rows, eta, need, moved, side};
 }
-const etaShort = eta => eta === null ? '+30 años' : eta === 0 ? 'Ya' : shortMonth(addMonths(eta));
+const etaShort = eta => eta === null ? '+30 años' : eta === 0 ? 'Ya' : addMonths(eta).toLocaleDateString('es-ES', {month:'short', year:'numeric'}).replace('.', '');
 const etaLong = eta => eta === null ? 'Más de 30 años con este ritmo' : eta === 0 ? 'Ya tienes lo necesario' : `${monthLabel(addMonths(eta))} · en ${durText(eta)}`;
 
 /* ---------- gráfico SVG ---------- */
-function lineChart({labels, series, hline, height = 230, nowIndex}) {
-  const W = 640, H = height, L = 44, R = 12, T = 14, B = 26;
+function lineChart({labels, series, hline, height = 210, nowIndex}) {
+  const W = 360, H = height, L = 32, R = 6, T = 16, B = 22;
   const all = series.flatMap(s => s.values); if (hline) all.push(hline.value);
   let max = Math.max(1, ...all), min = Math.min(0, ...all);
   max += (max - min) * 0.07;
@@ -348,13 +365,13 @@ function lineChart({labels, series, hline, height = 230, nowIndex}) {
   const x = i => L + (n <= 1 ? (W - L - R) / 2 : i * (W - L - R) / (n - 1));
   const y = v => T + (H - T - B) * (1 - (v - min) / (max - min));
   let g = '';
-  for (let t = 0; t <= 4; t++) {
-    const v = min + (max - min) * t / 4;
+  for (let t = 0; t <= 3; t++) {
+    const v = min + (max - min) * t / 3;
     g += `<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" class="grid"/><text x="${L-7}" y="${(y(v)+4).toFixed(1)}" class="ax" text-anchor="end">${compact(v)}</text>`;
   }
-  const step = Math.max(1, Math.ceil(n / 6));
+  const step = Math.max(1, Math.ceil(n / 4));
   for (let i = 0; i < n; i += step) {
-    const anchor = i === 0 ? 'start' : 'middle';
+    const anchor = i === 0 ? 'start' : (i + step >= n ? 'end' : 'middle');
     g += `<text x="${x(i).toFixed(1)}" y="${H-6}" class="ax" text-anchor="${anchor}">${esc(labels[i])}</text>`;
   }
   if (hline) {
@@ -366,17 +383,21 @@ function lineChart({labels, series, hline, height = 230, nowIndex}) {
   for (const s of series) {
     if (n === 1) { g += `<circle cx="${x(0)}" cy="${y(s.values[0])}" r="4" style="fill:${s.color}"/>`; continue; }
     const d = s.values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join('');
-    g += `<path d="${d}" fill="none" style="stroke:${s.color}" stroke-width="${s.width || 2.5}" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ' stroke-dasharray="6 5"' : ''}/>`;
+    g += `<path d="${d}" fill="none" style="stroke:${s.color}" stroke-width="${s.width || 2.2}" stroke-linejoin="round" stroke-linecap="round"${s.dash ? ' stroke-dasharray="6 5"' : ''}/>`;
   }
   const legend = series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.name)}</span>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" class="chart" role="img" aria-label="Gráfico">${g}</svg><div class="legend">${legend}</div>`;
 }
 
 /* ---------- helpers de formulario ---------- */
-const num = (label, path, o = {}) => `<label class="field"><span>${label}</span><div class="inp"><input type="number" inputmode="decimal" step="${o.step || 'any'}" ${o.min != null ? `min="${o.min}"` : ''} data-bind="${path}" value="${esc(getPath(path))}">${o.suf ? `<em>${o.suf}</em>` : ''}</div>${o.hint ? `<small>${o.hint}</small>` : ''}</label>`;
+const showNum = v => String(v ?? '').replace('.', ',');
+const num = (label, path, o = {}) => `<label class="field"><span>${label}</span><div class="inp"><input type="text" inputmode="decimal" autocomplete="off" ${o.min != null ? `data-min="${o.min}"` : ''} data-bind="${path}" value="${esc(showNum(getPath(path)))}">${o.suf ? `<em>${o.suf}</em>` : ''}</div>${o.hint ? `<small>${o.hint}</small>` : ''}</label>`;
 const tog = (label, path, hint) => `<label class="toggle"><input type="checkbox" data-bind="${path}" ${getPath(path) ? 'checked' : ''}><span class="sw"></span><span class="tl">${label}${hint ? `<small>${hint}</small>` : ''}</span></label>`;
 const opts = (map, sel) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${esc(typeof v === 'string' ? v : v.label)}</option>`).join('');
-const txtField = (label, id, val, type = 'text', extra = '') => `<label class="field"><span>${label}</span><div class="inp"><input id="${id}" type="${type}" value="${esc(val)}" ${extra}></div></label>`;
+const txtField = (label, id, val, type = 'text', extra = '') => {
+  if (type === 'number') { type = 'text'; extra = extra.replace(/step="[^"]*"/, '') + ' inputmode="decimal" autocomplete="off"'; val = String(val ?? '').replace('.', ','); }
+  return `<label class="field"><span>${label}</span><div class="inp"><input id="${id}" type="${type}" value="${esc(val)}" ${extra}></div></label>`;
+};
 
 /* ---------- vistas ---------- */
 let tab = (() => { try { return localStorage.getItem(TAB_KEY) || 'resumen'; } catch (e) { return 'resumen'; } })();
@@ -385,24 +406,40 @@ let refresh = null;
 function buildAlerts(b, sim) {
   const out = [], p = S.plan, need = sim.need;
   const idle = b.operativo - p.operatingTarget;
-  if (idle > 200) {
-    const r = bucketRate('casa');
-    out.push(['warn', `Tienes <b>${eur(idle)}</b> en cuentas operativas por encima de tu colchón de gastos (${eur(p.operatingTarget)}). Al ${pct(r)} te darían unos <b>${eur(idle * r / 100)} al año</b>.`]);
-  }
-  if (b.emergencia < p.emergencyTarget) {
-    out.push(['info', `Bolsa de emergencia: <b>${eur(b.emergencia)}</b> de ${eur(p.emergencyTarget)}.${b.emergencia === 0 ? ' Asigna una cuenta a la bolsa Emergencia en la pestaña Cuentas.' : ''}`]);
-  }
-  if (sim.eta !== null && sim.eta <= 36 && S.accounts.some(a => a.bucket === 'casa' && a.type === 'indexado')) {
-    out.push(['warn', 'Tienes un fondo indexado en la bolsa Casa y compras en menos de 3 años: una caída de la bolsa podría retrasar la compra.']);
-  }
-  if (need.ratio > 0.35) {
-    out.push(['bad', `La cuota estimada (${eur(need.cuota)}/mes) supera el 35 % de tu sueldo neto medio. Los bancos suelen poner el límite ahí.`]);
-  }
   const last = sortedSnaps().pop();
   if (!last || last.date.slice(0, 7) !== todayISO().slice(0, 7)) {
-    out.push(['info', 'Aún no has guardado la foto de saldos de este mes. Hazlo en Cuentas → Actualizar saldos.']);
+    out.push({t:'info', ic:'🗓️', h:'<b>Toca la revisión del mes.</b> Pon los saldos de tus cuentas para ver cómo vas.', btn:['Actualizar saldos', 'update-bal']});
+  }
+  if (idle > 200) {
+    const r = bucketRate('casa');
+    out.push({t:'warn', ic:'💤', h:`<b>${eur(idle)} están parados.</b> Es lo que tienes en cuentas del día a día por encima de lo que necesitas (${eur(p.operatingTarget)}). Movidos a una cuenta al ${pct(r)} te darían unos <b>${eur(idle * r / 100)} al año</b>.`, btn:['Ver mis cuentas', 'goto:cuentas']});
+  }
+  if (b.emergencia < p.emergencyTarget) {
+    const falta = p.emergencyTarget - b.emergencia;
+    out.push({t:'info', ic:'🛟', h: b.emergencia === 0
+      ? `<b>Aún no tienes colchón de emergencias.</b> La idea es apartar ${eur(p.emergencyTarget)} para imprevistos. Puedes abrir una cuenta para eso o marcar una que ya tengas como "Emergencias".`
+      : `<b>Tu colchón de emergencias va por ${eur(b.emergencia)}.</b> Te faltan ${eur(falta)} para llegar a ${eur(p.emergencyTarget)}.`, btn:['Organizar cuentas', 'goto:cuentas']});
+  }
+  if (sim.eta !== null && sim.eta <= 36 && S.accounts.some(a => a.bucket === 'casa' && a.type === 'indexado')) {
+    out.push({t:'warn', ic:'⚠️', h:'<b>Tienes un fondo de bolsa en el dinero de la casa.</b> Si compras en menos de 3 años, una caída del mercado podría retrasarte.'});
+  }
+  if (need.ratio > 0.35) {
+    out.push({t:'bad', ic:'🏦', h:`<b>La hipoteca se come mucho sueldo.</b> La cuota estimada (${eur(need.cuota)}/mes) es el ${pct(need.ratio * 100, 0)} de lo que cobras. Los bancos suelen pedir que no pase del 35 %.`, btn:['Ajustar la casa', 'goto:casa']});
   }
   return out;
+}
+const alertHTML = a => `<div class="alert ${a.t}"><span class="ic">${a.ic}</span><div class="bd">${a.h}${a.btn ? `<div><button class="go" data-action="${a.btn[1].startsWith('goto:') ? 'goto' : a.btn[1]}" data-v="${a.btn[1].replace('goto:', '')}">${a.btn[0]} →</button></div>` : ''}</div></div>`;
+function greeting() {
+  const h = new Date().getHours();
+  const g = h < 14 ? 'Buenos días' : h < 21 ? 'Buenas tardes' : 'Buenas noches';
+  return S.ui.name ? `${g}, ${esc(S.ui.name)}` : g;
+}
+function heroMessage(b, sim) {
+  const need = sim.need, falta = Math.max(0, need.total - b.casa);
+  if (sim.eta === 0 || falta === 0) return 'Ya tienes ahorrado todo lo que necesitas para la casa. 🎉';
+  if (sim.eta === null) return `Te faltan ${eur(falta)} para la casa y, con este ritmo, no llegarías en 30 años. Revisa el plan.`;
+  const when = addMonths(sim.eta).toLocaleDateString('es-ES', {month:'long', year:'numeric'});
+  return `Te faltan ${eur(falta)} para la casa. A este ritmo, la tendrías en ${when}.`;
 }
 
 function viewResumen() {
@@ -415,45 +452,53 @@ function viewResumen() {
   const legend = BK.map(k => `<div class="row"><span><span class="dot" style="background:var(--b-${k})"></span>${BUCKETS[k].label}</span><span class="num">${eur(b[k])} <span class="muted small">${total ? pct(b[k] / total * 100, 0) : ''}</span></span></div>`).join('');
   const safe = S.accounts.filter(a => a.type !== 'indexado').reduce((s, a) => s + a.balance * a.rate / 100, 0);
   const expRet = S.accounts.filter(a => a.type === 'indexado').reduce((s, a) => s + a.balance * a.rate / 100, 0);
-  const alerts = buildAlerts(b, sim).map(([t, h]) => `<div class="alert ${t}">${h}</div>`).join('');
+  const alerts = buildAlerts(b, sim).map(alertHTML).join('');
   const snaps = sortedSnaps();
   let hist;
   if (snaps.length >= 2) {
     hist = lineChart({
-      labels: snaps.map(s => dateFmt(s.date)),
+      labels: snaps.map(s => new Date(s.date + 'T12:00:00').toLocaleDateString('es-ES', {month:'short', year:'2-digit'}).replace('.', '')),
       series: [
         {name:'Total', color:'var(--b-total)', values: snaps.map(s => s.total)},
-        {name:'Casa', color:'var(--b-casa)', values: snaps.map(s => s.byBucket.casa || 0)},
-        {name:'Largo plazo', color:'var(--b-largo)', values: snaps.map(s => s.byBucket.largo || 0)}
-      ], height: 210
+        {name:'Para la casa', color:'var(--b-casa)', values: snaps.map(s => s.byBucket.casa || 0)},
+        {name:'Inversión', color:'var(--b-largo)', values: snaps.map(s => s.byBucket.largo || 0)}
+      ]
     });
-  } else hist = `<p class="empty">Cuando guardes la foto de saldos de varios meses, aquí verás cómo evoluciona tu patrimonio.</p>`;
-
+  } else hist = `<p class="empty">📊 Aquí verás cómo crece tu dinero mes a mes. Cada vez que hagas la revisión mensual se añade un punto. El siguiente, en diciembre.</p>`;
+  const welcome = S.ui.welcomeDone ? '' : `
+  <section class="card welcome">
+    <h2><span class="em">👋</span>Cómo funciona</h2>
+    <ol>
+      <li><b>Cuentas:</b> ya están tus 4 cuentas. Cada una va en una "hucha" según para qué es el dinero.</li>
+      <li><b>Una vez al mes</b> pulsa "Actualizar saldos" y pon lo que tienes. Tarda un minuto.</li>
+      <li><b>Casa</b> y <b>Plan</b>: juega con los números (precio, cuánto inviertes…) y mira cómo cambia la fecha de compra.</li>
+    </ol>
+    <button class="btn" data-action="welcome-ok">Entendido</button>
+  </section>`;
   return `
+  ${welcome}
+  <section class="card hero">
+    <p class="hello">${greeting()} 👋</p>
+    <p class="msg">${heroMessage(b, sim)}</p>
+    <div class="bar"><i style="width:${casaPct}%"></i></div>
+    <div class="foot"><span>${eur(b.casa)} de ${eur(need.total)}</span><span>${pct(casaPct, 0)}</span></div>
+  </section>
+  ${alerts ? `<section>${alerts}</section>` : `<div class="alert info"><span class="ic">✅</span><div class="bd"><b>Todo en orden.</b> No hay nada pendiente este mes.</div></div>`}
   <section class="card">
-    <h2>Patrimonio total</h2>
+    <h2><span class="em">💰</span>Todo tu dinero</h2>
     <div class="big num">${eur(total)}</div>
-    ${delta !== null ? `<div class="small ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲' : '▼'} ${eur(Math.abs(delta))} desde el ${dateFmt(prev.date)}</div>` : `<div class="small muted">Primera foto: ${dateFmt(snaps[0]?.date || todayISO())}</div>`}
+    ${delta !== null ? `<div class="small ${delta >= 0 ? 'up' : 'down'}">${delta >= 0 ? '▲ Has ganado' : '▼ Has bajado'} ${eur(Math.abs(delta))} desde el ${dateFmt(prev.date)}</div>` : `<div class="small muted">Empezaste a registrar el ${dateFmt(snaps[0]?.date || todayISO())}</div>`}
     <div class="stack">${stack}</div>
     <div class="rows">${legend}</div>
   </section>
   <section class="card">
-    <h2>Objetivo casa</h2>
-    <div class="split"><span class="mid num">${eur(b.casa)}</span><span class="muted">de ${eur(need.total)}</span></div>
-    <div class="progress"><i style="width:${casaPct}%"></i></div>
-    <div class="row small"><span class="muted">${pct(casaPct, 0)} completado</span><span class="muted">faltan ${eur(Math.max(0, need.total - b.casa))}</span></div>
-    <p style="margin:12px 0 0"><b>Fecha estimada:</b> ${etaLong(sim.eta)}</p>
-    ${sim.moved > 0 ? `<span class="note">Contando que mueves los ${eur(sim.moved)} parados de cuentas operativas.</span>` : ''}
-  </section>
-  ${alerts ? `<section>${alerts}</section>` : ''}
-  <section class="card">
-    <h2>Rendimiento estimado al año</h2>
+    <h2><span class="em">🌱</span>Lo que te genera tu dinero al año</h2>
     <div class="kpis">
-      <div class="kpi"><b class="num">${eur(safe)}</b><span>Intereses de cuentas y monetarios</span></div>
-      <div class="kpi"><b class="num">${eur(expRet)}</b><span>Rentabilidad esperada de la inversión (no garantizada)</span></div>
+      <div class="kpi"><b class="num">${eur(safe)}</b><span>Intereses seguros de cuentas y fondo monetario</span></div>
+      <div class="kpi"><b class="num">${eur(expRet)}</b><span>Lo que se espera de la inversión (puede variar)</span></div>
     </div>
   </section>
-  <section class="card"><h2>Evolución</h2>${hist}</section>`;
+  <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>`;
 }
 
 function viewCuentas() {
@@ -462,7 +507,7 @@ function viewCuentas() {
     const acc = S.accounts.filter(a => a.bucket === k);
     if (!acc.length) return '';
     return `<section class="card">
-      <div class="bucket-h"><h2 style="margin:0"><span class="dot" style="background:var(--b-${k})"></span>${BUCKETS[k].label}</h2><span class="num"><b>${eur(b[k])}</b></span></div>
+      <div class="bucket-h"><h2 style="margin:0"><span class="em">${BUCKETS[k].em}</span>${BUCKETS[k].label}</h2><span class="num"><b>${eur(b[k])}</b></span></div>
       <div class="small muted" style="margin-bottom:6px">${BUCKETS[k].desc}</div>
       ${acc.map(a => {
         const gain = a.invested != null && a.invested > 0 ? a.balance - a.invested : null;
@@ -476,18 +521,18 @@ function viewCuentas() {
   const snaps = sortedSnaps().reverse();
   return `
   <section class="card">
-    <h2>Total en cuentas</h2>
+    <h2><span class="em">🏦</span>Tus cuentas</h2>
     <div class="big num">${eur(total)}</div>
     <div class="btnrow" style="margin-top:12px">
       <button class="btn" data-action="update-bal">Actualizar saldos</button>
       <button class="btn ghost" data-action="add-acc">Añadir cuenta</button>
     </div>
-    <span class="note">Una vez al mes, actualiza los saldos: se guarda una foto para ver tu evolución.</span>
+    <span class="note">Una vez al mes, pulsa <b>Actualizar saldos</b> y pon lo que tienes en cada cuenta. Así la app sabe cómo vas. Toca una cuenta para editarla o cambiarla de hucha.</span>
   </section>
   ${groups || '<p class="empty">No tienes cuentas. Añade la primera.</p>'}
   <section class="card">
-    <h2>Fotos de saldos</h2>
-    ${snaps.length ? snaps.map(s => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span>${dateFmt(s.date)}</span><span><b class="num">${eur(s.total)}</b> <button class="x" data-action="del-snap" data-date="${s.date}" aria-label="Borrar foto">×</button></span></div>`).join('') : '<p class="empty">Sin fotos todavía.</p>'}
+    <h2><span class="em">🗓️</span>Revisiones mensuales</h2>
+    ${snaps.length ? snaps.map(s => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span>${dateFmt(s.date)}</span><span><b class="num">${eur(s.total)}</b> <button class="x" data-action="del-snap" data-date="${s.date}" aria-label="Borrar foto">×</button></span></div>`).join('') : '<p class="empty">Aún no has hecho ninguna revisión.</p>'}
   </section>`;
 }
 
@@ -497,35 +542,36 @@ function viewCasa() {
     const p = n.total ? Math.min(100, b.casa / n.total * 100) : 0;
     $('#results').innerHTML = `
     <section class="card">
-      <h2>Lo que necesitas ahorrar</h2>
+      <h2><span class="em">🏠</span>Lo que necesitas ahorrar</h2>
       <div class="big num">${eur(n.total)}</div>
       <div class="progress"><i style="width:${p}%"></i></div>
-      <div class="row small"><span class="muted">Tienes ${eur(b.casa)} en la bolsa Casa</span><span class="muted">${pct(p, 0)}</span></div>
+      <div class="row small"><span class="muted">Llevas ${eur(b.casa)} ahorrados</span><span class="muted">${pct(p, 0)}</span></div>
       <div class="rows" style="margin-top:12px">
         <div class="row"><span>Entrada (${pct(S.house.downPct, 0)})</span><span class="num">${eur(n.down)}</span></div>
-        <div class="row"><span>ITP (${pct(n.itpRate)})</span><span class="num">${eur(n.itp)}</span></div>
+        <div class="row"><span>Impuesto de compra, ITP (${pct(n.itpRate)})</span><span class="num">${eur(n.itp)}</span></div>
         <div class="row"><span>Notaría, registro, tasación…</span><span class="num">${eur(n.other)}</span></div>
         <div class="row"><span>Muebles y colchón tras comprar</span><span class="num">${eur(n.furnish)}</span></div>
       </div>
       <p style="margin:14px 0 0"><b>Fecha estimada:</b> ${etaLong(sim.eta)}</p>
     </section>
     <section class="card">
-      <h2>Hipoteca estimada</h2>
+      <h2><span class="em">🏦</span>Tu hipoteca aproximada</h2>
       <div class="kpis">
         <div class="kpi"><b class="num">${eur(n.cuota)}</b><span>Cuota mensual</span></div>
-        <div class="kpi"><b class="num ${n.ratio > .35 ? 'down' : n.ratio > .3 ? '' : 'up'}">${pct(n.ratio * 100, 0)}</b><span>Del sueldo neto medio (${eur(n.netMonthly)})</span></div>
-        <div class="kpi"><b class="num">${eur(n.loan)}</b><span>Préstamo</span></div>
-        <div class="kpi"><b class="num">${eur(n.interestTotal)}</b><span>Intereses totales</span></div>
+        <div class="kpi"><b class="num ${n.ratio > .35 ? 'down' : n.ratio > .3 ? '' : 'up'}">${pct(n.ratio * 100, 0)}</b><span>De tu sueldo (${eur(n.netMonthly)}/mes de media)</span></div>
+        <div class="kpi"><b class="num">${eur(n.loan)}</b><span>Lo que te presta el banco</span></div>
+        <div class="kpi"><b class="num">${eur(n.interestTotal)}</b><span>Lo que pagas de intereses en total</span></div>
       </div>
-      <span class="note">Cuota con sistema francés y tipo fijo. Los bancos suelen exigir que la cuota no pase del 30–35 % de tus ingresos netos.</span>
+      <span class="note">${n.ratio <= .3 ? '👍 Cuota cómoda para tu sueldo.' : n.ratio <= .35 ? '👀 Cuota justa: está en el límite que suelen aceptar los bancos.' : '✋ Cuota alta: los bancos suelen pedir que no pase del 35 % de tu sueldo.'} Calculada a tipo fijo.</span>
     </section>`;
     document.querySelectorAll('[data-action="down"]').forEach(c => c.classList.toggle('on', +c.dataset.v === +S.house.downPct));
   };
   return `
   <div id="results"></div>
   <section class="card">
-    <h2>La vivienda</h2>
-    <div class="grid2">${num('Precio', 'house.price', {suf:'€', step:1000, min:0})}${num('Entrada que aportas', 'house.downPct', {suf:'%', step:1, min:0})}</div>
+    <h2><span class="em">🔑</span>La casa que buscas</h2>
+    <p class="help">Cambia los números y mira arriba cómo se mueve todo.</p>
+    <div class="grid2">${num('Precio', 'house.price', {suf:'€', step:1000, min:0})}${num('Entrada que pones tú', 'house.downPct', {suf:'%', step:1, min:0})}</div>
     <div class="chips">
       <button class="chip" data-action="down" data-v="20">Estándar 20 %</button>
       <button class="chip" data-action="down" data-v="10">10 %</button>
@@ -535,7 +581,7 @@ function viewCasa() {
     <span class="note">El aval ICO para jóvenes y los programas de la Junta permiten financiar hasta el 95–100 % si cumples los límites de ingresos y precio. Comprueba las condiciones vigentes con tu banco.</span>
   </section>
   <section class="card">
-    <h2>Gastos de compra</h2>
+    <h2><span class="em">🧾</span>Gastos de la compra</h2>
     ${tog('Tipo reducido de ITP para jóvenes', 'house.young', 'Andalucía · menores de 35 · vivienda habitual · con límite de precio')}
     <div class="grid2">
       ${num('ITP reducido', 'house.itpYoung', {suf:'%', step:.5, min:0})}
@@ -545,7 +591,7 @@ function viewCasa() {
     </div>
   </section>
   <section class="card">
-    <h2>Hipoteca</h2>
+    <h2><span class="em">⚙️</span>Condiciones de la hipoteca</h2>
     <div class="grid2">${num('Tipo de interés', 'house.mortgageRate', {suf:'%', step:.1, min:0})}${num('Plazo', 'house.years', {suf:'años', step:1, min:1})}</div>
   </section>`;
 }
@@ -566,10 +612,10 @@ function viewPlan() {
       labels: rows.map(r => shortMonth(r.date)),
       series: [
         {name:'Total', color:'var(--b-total)', values: rows.map(r => r.total)},
-        {name:'Bolsa casa', color:'var(--b-casa)', values: rows.map(r => r.casa)},
-        {name:'Largo plazo', color:'var(--b-largo)', values: rows.map(r => r.largo)}
+        {name:'Para la casa', color:'var(--b-casa)', values: rows.map(r => r.casa)},
+        {name:'Inversión', color:'var(--b-largo)', values: rows.map(r => r.largo)}
       ],
-      hline: {value: sim.need.total, label: 'Necesario casa ' + compact(sim.need.total) + ' €'}
+      hline: {value: sim.need.total, label: 'Casa ' + compact(sim.need.total) + ' €'}
     });
     const options = [...new Set([0, 200, 400, 600, 800, +p.spMonthly])].sort((a, b) => a - b);
     const table = options.map(v => {
@@ -579,52 +625,53 @@ function viewPlan() {
     }).join('');
     $('#results').innerHTML = `
     <section class="card">
-      <h2>Tu año en números</h2>
+      <h2><span class="em">📅</span>Tu año en números</h2>
       <div class="kpis">
-        <div class="kpi"><b class="num">${eur(incomeY)}</b><span>Ingresos netos al año</span></div>
-        <div class="kpi"><b class="num">${eur(saveY)}</b><span>Ahorro al año</span></div>
-        <div class="kpi"><b class="num up">${pct(incomeY ? saveY / incomeY * 100 : 0, 0)}</b><span>Tasa de ahorro</span></div>
-        <div class="kpi"><b class="num">${eur(saveY - spY)}</b><span>Al año para casa y emergencia</span></div>
+        <div class="kpi"><b class="num">${eur(incomeY)}</b><span>Lo que cobras al año</span></div>
+        <div class="kpi"><b class="num">${eur(saveY)}</b><span>Lo que ahorras al año</span></div>
+        <div class="kpi"><b class="num up">${pct(incomeY ? saveY / incomeY * 100 : 0, 0)}</b><span>De lo que cobras, ahorras</span></div>
+        <div class="kpi"><b class="num">${eur(saveY - spY)}</b><span>Va a la casa y al colchón al año</span></div>
       </div>
       ${side ? `<span class="note">Incluye ${eur(side)}/mes de media de ingresos extra.</span>` : ''}
     </section>
     <section class="card">
-      <h2>Aportación mensual al S&P 500</h2>
-      <div class="row"><span class="mid num">${eur(p.spMonthly)}</span><span class="muted small">Casa: ${etaShort(sim.eta)}</span></div>
+      <h2><span class="em">⚖️</span>¿Cuánto metes en el S&P 500?</h2>
+      <p class="help">Mueve la barra: más inversión hace crecer tu dinero a largo plazo, pero retrasa la casa.</p>
+      <div class="row"><span class="mid num">${eur(p.spMonthly)}</span><span class="muted small">al mes · casa en ${etaShort(sim.eta)}</span></div>
       <input type="range" class="range" min="0" max="1500" step="50" data-bind="plan.spMonthly" value="${p.spMonthly}" aria-label="Aportación mensual al S&P 500">
       <table class="cmp" style="margin-top:8px">
-        <thead><tr><th>S&P 500</th><th>Casa</th><th>Largo a 10 años</th><th>Total a 10 años</th></tr></thead>
+        <thead><tr><th>Al mes</th><th>Casa</th><th>Inversión en 10 años</th><th>Todo en 10 años</th></tr></thead>
         <tbody>${table}</tbody>
       </table>
-      <span class="note">Cada euro que va al S&P 500 retrasa la casa, pero crece más a largo plazo. Usa la rentabilidad esperada de cada cuenta, que no está garantizada.</span>
+      <span class="note">La fila resaltada es lo que haces ahora. La inversión usa un 7 % anual esperado, que no está garantizado.</span>
     </section>
     <section class="card">
-      <h2>Proyección a ${fin(+p.horizon)} años</h2>
+      <h2><span class="em">🔭</span>Tu dinero en los próximos ${fin(+p.horizon)} años</h2>
       ${chart}
-      <p style="margin:10px 0 0" class="small"><b>Casa:</b> ${etaLong(sim.eta)}</p>
+      <p style="margin:10px 0 0" class="small">La línea discontinua es lo que necesitas para la casa. <b>La alcanzas:</b> ${etaLong(sim.eta)}</p>
     </section>`;
   };
   return `
   <div id="results"></div>
   <section class="card">
-    <h2>Ingresos y gastos</h2>
+    <h2><span class="em">💶</span>Tu sueldo y tus gastos</h2>
     <div class="grid2">
-      ${num('Nómina neta', 'plan.salary', {suf:'€', step:10, min:0})}
+      ${num('Nómina neta al mes', 'plan.salary', {suf:'€', step:10, min:0})}
       ${num('Pagas extra al año', 'plan.extraPays', {step:1, min:0, hint:'Se cobran en junio y diciembre'})}
-      ${num('Gasto mensual', 'plan.expenses', {suf:'€', step:10, min:0})}
-      ${num('Aportación S&P 500', 'plan.spMonthly', {suf:'€/mes', step:50, min:0})}
+      ${num('Lo que gastas al mes', 'plan.expenses', {suf:'€', step:10, min:0})}
+      ${num('Al S&P 500 al mes', 'plan.spMonthly', {suf:'€/mes', step:50, min:0})}
     </div>
   </section>
   <section class="card">
-    <h2>Bolsas y supuestos</h2>
+    <h2><span class="em">🛠️</span>Ajustes del cálculo</h2>
     <div class="grid2">
-      ${num('Objetivo de emergencia', 'plan.emergencyTarget', {suf:'€', step:500, min:0})}
-      ${num('Colchón operativo', 'plan.operatingTarget', {suf:'€', step:100, min:0})}
+      ${num('Colchón de emergencias', 'plan.emergencyTarget', {suf:'€', step:500, min:0})}
+      ${num('Dinero para el día a día', 'plan.operatingTarget', {suf:'€', step:100, min:0})}
       ${num('Horizonte del gráfico', 'plan.horizon', {suf:'años', step:1, min:1})}
     </div>
-    ${tog('Mover el dinero parado', 'plan.moveIdle', 'Lo que pase del colchón operativo va primero a emergencia y luego a casa')}
-    ${tog('Contar ingresos extra', 'plan.includeSide', 'Media de los últimos 6 meses de la pestaña Extras')}
-    <span class="note">Cada mes: tu ahorro llena primero la bolsa de emergencia hasta el objetivo y el resto va a la casa. Los intereses usan el tipo medio de las cuentas de cada bolsa.</span>
+    ${tog('Contar con que mueves el dinero parado', 'plan.moveIdle', 'Lo que sobre del día a día pasa al colchón y luego a la casa')}
+    ${tog('Sumar mis ingresos extra', 'plan.includeSide', 'Usa la media de los últimos 6 meses de la pestaña Extras')}
+    <span class="note">Cómo calcula: cada mes, lo que ahorras llena primero el colchón de emergencias y el resto va a la casa, con el interés de tus cuentas.</span>
   </section>
   <p class="disclaimer">Estimaciones orientativas, no asesoramiento financiero.</p>`;
 }
@@ -641,26 +688,26 @@ function viewExtras() {
   const done = S.checklist.filter(c => c.done).length;
   return `
   <section class="card">
-    <h2>Ingresos extra</h2>
+    <h2><span class="em">⚡</span>Ingresos extra</h2>
     <div class="kpis">
       <div class="kpi"><b class="num">${eur(yearTotal)}</b><span>En ${year}</span></div>
-      <div class="kpi"><b class="num">${eur(avg)}</b><span>Media mensual (6 meses)</span></div>
+      <div class="kpi"><b class="num">${eur(avg)}</b><span>De media al mes</span></div>
     </div>
     <div class="btnrow" style="margin-top:12px"><button class="btn" data-action="add-inc" ${S.projects.length ? '' : 'disabled'}>Registrar ingreso</button></div>
   </section>
   <section class="card">
-    <div class="bucket-h"><h2 style="margin:0">Proyectos</h2><button class="chip" data-action="add-proj">+ Nuevo</button></div>
+    <div class="bucket-h"><h2 style="margin:0"><span class="em">💡</span>Ideas y proyectos</h2><button class="chip" data-action="add-proj">+ Nuevo</button></div>
     ${projects.length ? projects.map(p => `<button class="acc" data-action="edit-proj" data-id="${p.id}">
       <span><b>${esc(p.name)}</b>${p.notes ? `<div class="meta">${esc(p.notes.length > 80 ? p.notes.slice(0, 80) + '…' : p.notes)}</div>` : ''}</span>
       <span class="r"><span class="tag ${p.status}">${STATUS[p.status] || p.status}</span>${earned(p.id) ? `<div class="meta num">${eur(earned(p.id))}</div>` : ''}</span>
     </button>`).join('') : '<p class="empty">Sin proyectos.</p>'}
   </section>
   <section class="card">
-    <h2>Últimos ingresos</h2>
-    ${inc.length ? inc.map(i => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span><b>${esc(i.concept || pname(i.projectId))}</b><div class="meta small muted">${dateFmt(i.date)} · ${esc(pname(i.projectId))}</div></span><span class="num"><b class="up">+${eur(i.amount)}</b> <button class="x" data-action="del-inc" data-id="${i.id}" aria-label="Borrar">×</button></span></div>`).join('') : '<p class="empty">Todavía no has registrado ingresos extra.</p>'}
+    <h2><span class="em">🧾</span>Lo que has ganado</h2>
+    ${inc.length ? inc.map(i => `<div class="row" style="padding:8px 0;border-top:1px solid var(--line)"><span><b>${esc(i.concept || pname(i.projectId))}</b><div class="meta small muted">${dateFmt(i.date)} · ${esc(pname(i.projectId))}</div></span><span class="num"><b class="up">+${eur(i.amount)}</b> <button class="x" data-action="del-inc" data-id="${i.id}" aria-label="Borrar">×</button></span></div>`).join('') : '<p class="empty">Aún nada. Cuando ganes tu primer euro extra, apúntalo aquí. 💪</p>'}
   </section>
   <section class="card">
-    <h2>Pendientes · ${done}/${S.checklist.length}</h2>
+    <h2><span class="em">✅</span>Tareas pendientes · ${done} de ${S.checklist.length}</h2>
     <div>${S.checklist.map(c => `<label class="check ${c.done ? 'done' : ''}"><input type="checkbox" data-action="check" data-id="${c.id}" ${c.done ? 'checked' : ''}><span class="t">${esc(c.text)}</span><button class="x" data-action="del-check" data-id="${c.id}" aria-label="Borrar">×</button></label>`).join('')}</div>
     <div class="addline"><div class="inp"><input id="newCheck" placeholder="Añadir tarea…" enterkeyhint="done"></div><button class="btn" data-action="add-check">Añadir</button></div>
   </section>`;
@@ -674,13 +721,13 @@ function render() {
   if (refresh) refresh();
   document.querySelectorAll('#tabs button').forEach(bt => bt.classList.toggle('on', bt.dataset.tab === tab));
   const b = sums();
-  $('#subtitle').textContent = eur(BK.reduce((s, k) => s + b[k], 0)) + ' · ' + new Date().toLocaleDateString('es-ES', {day:'numeric', month:'long'});
+  $('#subtitle').textContent = new Date().toLocaleDateString('es-ES', {weekday:'long', day:'numeric', month:'long'});
 }
 function syncBinds() {
   document.querySelectorAll('[data-bind]').forEach(el => {
     if (el === document.activeElement) return;
     const v = getPath(el.dataset.bind);
-    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = el.type === 'range' ? v : showNum(v);
   });
 }
 
@@ -700,20 +747,20 @@ function accForm(a) {
     ${txtField('Entidad', 'f-entity', a.entity, 'text', 'placeholder="Ej. Trade Republic"')}
     <div class="grid2">
       <label class="field"><span>Tipo</span><div class="inp"><select id="f-type">${opts(TYPES, a.type)}</select></div></label>
-      <label class="field"><span>Bolsa</span><div class="inp"><select id="f-bucket">${opts(BUCKETS, a.bucket)}</select></div></label>
+      <label class="field"><span>¿Para qué es este dinero?</span><div class="inp"><select id="f-bucket">${opts(BUCKETS, a.bucket)}</select></div></label>
       ${txtField('Saldo (€)', 'f-balance', a.balance, 'number', 'inputmode="decimal" step="any"')}
-      ${txtField('Interés o rentabilidad esperada (%)', 'f-rate', a.rate, 'number', 'inputmode="decimal" step="any"')}
+      ${txtField('Interés anual (%)', 'f-rate', a.rate, 'number', 'inputmode="decimal" step="any"')}
     </div>
-    ${txtField('Aportado en total (€) · opcional, para ver ganancias', 'f-invested', a.invested ?? '', 'number', 'inputmode="decimal" step="any" placeholder="Solo para inversiones"')}
+    ${txtField('Dinero que has metido en total (€) · opcional', 'f-invested', a.invested ?? '', 'number', 'inputmode="decimal" step="any" placeholder="Solo en inversiones, para ver cuánto ganas"')}
     <div class="btnrow"><button class="btn" data-action="save-acc" data-id="${a.id || ''}">Guardar</button><button class="btn ghost" data-action="close">Cancelar</button></div>
     ${isNew ? '' : `<div class="btnrow"><button class="btn danger block" data-action="del-acc" data-id="${a.id}">Eliminar cuenta</button></div>`}`);
 }
 function balForm() {
-  openModal(`<h2>Actualizar saldos</h2>
-    <p class="small muted" style="margin-top:-6px">Pon el saldo actual de cada cuenta. Se guardará como foto de hoy.</p>
+  openModal(`<h2>Revisión del mes 🗓️</h2>
+    <p class="help">Abre la app de cada banco y copia el saldo que tienes ahora. Si una cuenta no ha cambiado, déjala como está.</p>
     ${S.accounts.map(a => txtField(`${esc(a.name)} <span class="muted">· ${esc(a.entity)}</span>`, 'bal-' + a.id, a.balance, 'number', 'inputmode="decimal" step="any"')).join('')}
     ${txtField('Fecha', 'bal-date', todayISO(), 'date')}
-    <div class="btnrow"><button class="btn" data-action="save-bal">Guardar foto</button><button class="btn ghost" data-action="close">Cancelar</button></div>`);
+    <div class="btnrow"><button class="btn" data-action="save-bal">Guardar revisión</button><button class="btn ghost" data-action="close">Cancelar</button></div>`);
 }
 function projForm(p) {
   const isNew = !p;
@@ -736,12 +783,15 @@ function incForm() {
 function settingsForm() {
   let theme = ''; try { theme = localStorage.getItem('patrimonio.theme') || ''; } catch (e) {}
   openModal(`<h2>Ajustes</h2>
+    ${txtField('Tu nombre (para el saludo)', 's-name', S.ui.name)}
     <label class="field"><span>Tema</span><div class="inp"><select id="s-theme">${opts({'':'Automático', light:'Claro', dark:'Oscuro'}, theme)}</select></div></label>
     <h3 style="margin-top:14px">Copia de seguridad</h3>
     <p class="small muted" style="margin-top:0">Los datos se guardan solo en este dispositivo (clave <code>${KEY}</code>), así que el Hub puede copiarlos junto a tus otras PWAs.</p>
     <div class="btnrow"><button class="btn" data-action="export">Exportar JSON</button><button class="btn ghost" data-action="import">Importar JSON</button></div>
+    <div class="btnrow"><button class="btn ghost block" data-action="show-welcome">Ver de nuevo la guía de inicio</button></div>
     <div class="btnrow" style="margin-top:14px"><button class="btn danger block" data-action="reset">Restablecer datos iniciales</button></div>
     <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+  $('#s-name').addEventListener('change', e => { S.ui.name = e.target.value.trim(); commit(); });
   $('#s-theme').addEventListener('change', e => {
     const v = e.target.value;
     try { v ? localStorage.setItem('patrimonio.theme', v) : localStorage.removeItem('patrimonio.theme'); } catch (er) {}
@@ -766,6 +816,9 @@ document.addEventListener('click', e => {
   const act = el.dataset.action, id = el.dataset.id;
   switch (act) {
     case 'close': closeModal(); break;
+    case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
+    case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
+    case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
     case 'settings': settingsForm(); break;
     case 'add-acc': accForm(); break;
     case 'edit-acc': accForm(S.accounts.find(a => a.id === id)); break;
@@ -778,7 +831,7 @@ document.addEventListener('click', e => {
       closeModal(); commit(); break;
     }
     case 'del-acc':
-      if (confirm('¿Eliminar esta cuenta? Las fotos anteriores conservan sus totales.')) { S.accounts = S.accounts.filter(a => a.id !== id); closeModal(); commit(); }
+      if (confirm('¿Eliminar esta cuenta? Las revisiones anteriores no se pierden.')) { S.accounts = S.accounts.filter(a => a.id !== id); closeModal(); commit(); }
       break;
     case 'update-bal': balForm(); break;
     case 'save-bal': {
@@ -789,7 +842,7 @@ document.addEventListener('click', e => {
       closeModal(); commit(); break;
     }
     case 'del-snap':
-      if (confirm('¿Borrar la foto del ' + dateFmt(el.dataset.date) + '?')) { S.snapshots = S.snapshots.filter(s => s.date !== el.dataset.date); commit(); }
+      if (confirm('¿Borrar la revisión del ' + dateFmt(el.dataset.date) + '?')) { S.snapshots = S.snapshots.filter(s => s.date !== el.dataset.date); commit(); }
       break;
     case 'down': S.house.downPct = +el.dataset.v; save(); syncBinds(); if (refresh) refresh(); break;
     case 'add-proj': projForm(); break;
@@ -836,11 +889,11 @@ function onBind(e) {
   if (!path) return;
   let v;
   if (el.type === 'checkbox') v = el.checked;
-  else { v = parseFloat(String(el.value).replace(',', '.')); if (!isFinite(v)) return; if (el.min !== '' && v < +el.min) v = +el.min; }
+  else { v = parseFloat(String(el.value).replace(/\s/g, '').replace(',', '.')); if (!isFinite(v)) return; const mn = el.dataset.min ?? el.min; if (mn !== '' && mn != null && v < +mn) v = +mn; }
   setPath(path, v); save();
   if (refresh) refresh();
   syncBinds();
-  const b = sums(); $('#subtitle').textContent = eur(BK.reduce((s, k) => s + b[k], 0)) + ' · ' + new Date().toLocaleDateString('es-ES', {day:'numeric', month:'long'});
+  const b = sums(); $('#subtitle').textContent = new Date().toLocaleDateString('es-ES', {weekday:'long', day:'numeric', month:'long'});
 }
 document.addEventListener('input', onBind);
 document.addEventListener('change', e => { if (e.target.type === 'checkbox' && e.target.dataset.bind) onBind(e); });
