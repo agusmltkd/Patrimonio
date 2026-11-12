@@ -235,7 +235,7 @@ function defaults() {
       {id:uid(), name:'Cuenta remunerada', entity:'Trade Republic', type:'remunerada', bucket:'casa', balance:6017, rate:2.5, invested:null},
       {id:uid(), name:'Cuenta corriente', entity:'BBVA', type:'corriente', bucket:'operativo', balance:5100, rate:0, invested:null}
     ],
-    plan: {salary:1790, extraPays:2, expenses:350, spMonthly:400, emergencyTarget:4000, operatingTarget:1000, moveIdle:true, includeSide:false, horizon:10},
+    plan: {salary:1790, extraPays:2, expenses:350, spMonthly:400, emergencyTarget:4000, operatingTarget:1000, moveIdle:true, includeSide:false, horizon:10, spYears:10},
     house: {price:180000, downPct:20, young:true, itpYoung:3.5, itpGeneral:7, otherCosts:3000, furnish:3000, mortgageRate:3, years:30},
     ui: {name:'Agustín', welcomeDone:false},
     snapshots: [],
@@ -691,6 +691,46 @@ function viewCasa() {
   </section>`;
 }
 
+function spFuture(monthly, years, ratePct, start) {
+  const i = ratePct / 100 / 12, n = Math.round(years * 12);
+  const g = Math.pow(1 + i, n);
+  const total = start * g + (i ? monthly * (g - 1) / i : monthly * n);
+  const put = start + monthly * n;
+  return {total, put, gain: total - put};
+}
+function spCard() {
+  const p = S.plan;
+  const inv = S.accounts.filter(a => a.type === 'indexado');
+  const start = inv.reduce((s, a) => s + a.balance, 0);
+  const rate = inv.length ? inv.reduce((s, a) => s + a.balance * a.rate, 0) / (start || 1) || 7 : 7;
+  const yrs = fin(+p.spYears) || 10;
+  const f = spFuture(p.spMonthly, yrs, rate, start);
+  const bad = spFuture(p.spMonthly, yrs, Math.max(0, rate - 3), start);
+  const good = spFuture(p.spMonthly, yrs, rate + 2, start);
+  const putPct = f.total > 0 ? Math.min(100, f.put / f.total * 100) : 100;
+  const year = new Date().getFullYear() + yrs;
+  const real = f.total / Math.pow(1.02, yrs);
+  const others = [...new Set([200, 300, 400, 500])].filter(v => v !== +p.spMonthly).map(v => `<div class="row small"><span class="muted">Con ${eur(v)}/mes</span><span class="num">${eur(spFuture(v, yrs, rate, start).total)}</span></div>`).join('');
+  return `<section class="card">
+    <h2><span class="em">🌳</span>¿Cuánto tendrás gracias al S&P 500?</h2>
+    <p class="help">Metiendo <b>${eur(p.spMonthly)} al mes</b> (cámbialo con la barra de arriba) y partiendo de los ${eur(start)} que ya tienes.</p>
+    <div class="chips">${[5, 10, 15, 20, 30].map(y => `<button class="chip ${y === yrs ? 'on' : ''}" data-action="sp-years" data-v="${y}">${y} años</button>`).join('')}</div>
+    <p style="margin:6px 0 2px" class="muted small">En ${year} tendrías unos</p>
+    <div class="big num">${eur(f.total)}</div>
+    <div class="stack" style="height:14px"><i style="width:${putPct}%;background:var(--b-operativo)"></i><i style="width:${100 - putPct}%;background:var(--b-largo)"></i></div>
+    <div class="rows">
+      <div class="row"><span><span class="dot" style="background:var(--b-operativo)"></span>Lo que has metido tú</span><span class="num">${eur(f.put)}</span></div>
+      <div class="row"><span><span class="dot" style="background:var(--b-largo)"></span>Lo que gana el mercado por ti</span><span class="num up"><b>+${eur(f.gain)}</b></span></div>
+    </div>
+    <div class="kpis" style="margin-top:12px">
+      <div class="kpi"><b class="num">${eur(bad.total)}</b><span>Si va regular (${pct(Math.max(0, rate - 3), 0)} al año)</span></div>
+      <div class="kpi"><b class="num">${eur(good.total)}</b><span>Si va bien (${pct(rate + 2, 0)} al año)</span></div>
+    </div>
+    <div class="rows" style="margin-top:12px">${others}</div>
+    <span class="note">Calculado con un ${pct(rate, 0)} anual, la media histórica aproximada del S&P 500. Algunos años sube mucho y otros cae fuerte: no es una cifra garantizada. Con la inflación, esos ${eur(f.total)} equivaldrían a unos ${eur(real)} de hoy.</span>
+  </section>`;
+}
+
 function viewPlan() {
   refresh = () => {
     const p = S.plan;
@@ -740,6 +780,7 @@ function viewPlan() {
       </table>
       <span class="note">La fila resaltada es lo que haces ahora. La inversión usa un 7 % anual esperado, que no está garantizado.</span>
     </section>
+    ${spCard()}
     <section class="card">
       <h2><span class="em">🔭</span>Tu dinero en los próximos ${fin(+p.horizon)} años</h2>
       ${chart}
@@ -933,6 +974,7 @@ document.addEventListener('click', e => {
   const act = el.dataset.action, id = el.dataset.id;
   switch (act) {
     case 'close': closeModal(); break;
+    case 'sp-years': S.plan.spYears = +el.dataset.v; save(); if (refresh) refresh(); break;
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
     case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
