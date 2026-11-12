@@ -257,6 +257,7 @@ function defaults() {
       'Probar una tanda en Monteblanco'
     ].map(text => ({id:uid(), text, done:false}))
   };
+  s.accounts.forEach(x => { x.lots = []; });
   s.snapshots.push(makeSnapshot(s, todayISO()));
   return s;
 }
@@ -273,7 +274,8 @@ function normalize(s) {
     bucket: BUCKETS[a.bucket] ? a.bucket : 'operativo', balance: fin(+a.balance), rate: fin(+a.rate),
     invested: (a.invested === null || a.invested === '' || a.invested === undefined) ? null : fin(+a.invested),
     isin: a.isin ? String(a.isin).trim().toUpperCase() : null,
-    units: (a.units === null || a.units === '' || a.units === undefined) ? null : fin(+a.units)
+    units: (a.units === null || a.units === '' || a.units === undefined) ? null : fin(+a.units),
+    lots: Array.isArray(a.lots) ? a.lots.filter(l => l && l.date && fin(+l.amount) > 0).map(l => ({id: l.id || uid(), date: l.date, amount: fin(+l.amount), units: fin(+l.units)})) : []
   }));
   if (!s.version || s.version < 2) {
     for (const a of out.accounts) {
@@ -555,6 +557,35 @@ function viewResumen() {
   <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>`;
 }
 
+function lotUnits(isin, date, amount) { const at = navAt(isin, date); return at ? Math.round(amount / at[1] * 10000) / 10000 : 0; }
+function fundPerf(a) {
+  const lots = [...(a.lots || [])].sort((x, y) => x.date.localeCompare(y.date));
+  const h = fundHist(a.isin);
+  if (!lots.length || !h.length) return null;
+  const first = lots[0].date;
+  let pts = h.filter(([d]) => d >= first);
+  if (!pts.length) pts = [h[h.length - 1]];
+  const stepN = Math.max(1, Math.floor(pts.length / 100));
+  pts = pts.filter((_, i) => i % stepN === 0 || i === pts.length - 1);
+  let li = 0, u = 0, put = 0;
+  const rows = pts.map(([d, nav]) => {
+    while (li < lots.length && lots[li].date <= d) { u += lots[li].units; put += lots[li].amount; li++; }
+    return {d, value: u * nav, put};
+  });
+  const nav = h[h.length - 1][1];
+  const totU = lots.reduce((s, l) => s + l.units, 0), totPut = lots.reduce((s, l) => s + l.amount, 0);
+  const value = totU * nav;
+  const per = lots.map(l => ({...l, now: l.units * nav, gain: l.units * nav - l.amount, gp: l.amount ? (l.units * nav / l.amount - 1) * 100 : 0}));
+  return {rows, value, put: totPut, gain: value - totPut, gp: totPut ? (value / totPut - 1) * 100 : 0, units: totU, per, nav};
+}
+function perfChart(perf) {
+  const lab = perf.rows.map(r => new Date(r.d + 'T12:00:00').toLocaleDateString('es-ES', {month:'short', year:'2-digit'}).replace('.', ''));
+  return lineChart({labels: lab, height: 190, series: [
+    {name:'Lo que vale', color:'var(--b-largo)', values: perf.rows.map(r => r.value)},
+    {name:'Lo que has metido', color:'var(--b-operativo)', values: perf.rows.map(r => r.put), dash: true}
+  ]});
+}
+
 function fundsCard() {
   const funds = S.accounts.filter(a => a.isin);
   if (!funds.length) return '';
@@ -569,10 +600,26 @@ function fundsCard() {
     pts = pts.filter((_, i) => i % stepN === 0 || i === pts.length - 1);
     const yr = pts.length > 1 ? (pts[pts.length - 1][1] / pts[0][1] - 1) * 100 : null;
     const color = a.bucket === 'largo' ? 'var(--b-largo)' : 'var(--b-casa)';
+    const perf = fundPerf(a);
+    if (perf) {
+      const up = perf.gain >= 0;
+      return `<div style="padding:10px 0;border-top:1px solid var(--line)">
+        <div class="row"><span><b>${esc(a.name)}</b><div class="meta small muted">${perf.per.length} compras apuntadas</div></span>
+        <span class="r"><b class="num ${up ? 'up' : 'down'}">${up ? '+' : ''}${eur(perf.gain)}</b><div class="small ${up ? 'up' : 'down'}">${up ? '+' : ''}${pct(perf.gp)}</div></span></div>
+        <div class="kpis" style="margin:10px 0 4px">
+          <div class="kpi"><b class="num">${eur(perf.put)}</b><span>Lo que has metido</span></div>
+          <div class="kpi"><b class="num">${eur(perf.value)}</b><span>Lo que vale hoy</span></div>
+        </div>
+        ${perfChart(perf)}
+        <p class="help" style="margin:8px 0">Cuando la línea de color va por encima de la discontinua, estás ganando; la distancia entre las dos es tu ganancia.</p>
+        <button class="btn ghost block" data-action="lots" data-id="${a.id}">Ver mis compras y cuáles van ganando</button>
+      </div>`;
+    }
     return `<div style="padding:10px 0;border-top:1px solid var(--line)">
       <div class="row"><span><b>${esc(a.name)}</b><div class="meta small muted">${esc(n.name || a.isin)}</div></span>
       <span class="r"><b class="num">${n.nav.toLocaleString('es-ES', {maximumFractionDigits:4})} €</b>${yr != null ? `<div class="small ${yr >= 0 ? 'up' : 'down'}">${yr >= 0 ? '+' : ''}${pct(yr)} ${pts.length > 200 ? 'en un año' : 'en el periodo'}</div>` : ''}</span></div>
       ${lineChart({labels: pts.map(([d]) => new Date(d + 'T12:00:00').toLocaleDateString('es-ES', {month:'short', year:'2-digit'}).replace('.', '')), series: [{name:'Valor liquidativo', color, values: pts.map(p => p[1])}], height: 150, zero: false}).replace(/<div class="legend">.*<\/div>$/, '')}
+      ${a.type === 'indexado' ? `<button class="btn ghost block" style="margin-top:8px" data-action="lots" data-id="${a.id}">📈 Apuntar mis compras para ver lo que gano</button>` : ''}
     </div>`;
   }).join('');
   return `<section class="card">
@@ -897,6 +944,40 @@ function accForm(a) {
     ${!isNew && a.isin ? `<div class="btnrow"><button class="btn ghost block" data-action="buy" data-id="${a.id}">➕ Registrar una compra</button></div>` : ''}
     ${isNew ? '' : `<div class="btnrow"><button class="btn danger block" data-action="del-acc" data-id="${a.id}">Eliminar cuenta</button></div>`}`);
 }
+function lotsForm(a, msg) {
+  const perf = fundPerf(a);
+  const per = perf ? [...perf.per].sort((x, y) => y.date.localeCompare(x.date)) : [];
+  const best = per.length > 1 ? per.reduce((m, l) => l.gp > m.gp ? l : m) : null;
+  const worst = per.length > 1 ? per.reduce((m, l) => l.gp < m.gp ? l : m) : null;
+  const mism = perf && a.units > 0 ? Math.abs(perf.units - a.units) / a.units : 0;
+  const list = per.length ? per.map(l => `<div class="row" style="padding:9px 0;border-top:1px solid var(--line)">
+      <span><b>${dateFmt(l.date)}</b><div class="meta small muted">${eur(l.amount, 0)} → hoy ${eur(l.now)}</div></span>
+      <span class="r num"><b class="${l.gain >= 0 ? 'up' : 'down'}">${l.gain >= 0 ? '+' : ''}${pct(l.gp)}</b> <button class="x" data-action="del-lot" data-id="${a.id}" data-lot="${l.id}" aria-label="Borrar compra">×</button></span>
+    </div>`).join('') : '<p class="empty">Aún no has apuntado ninguna compra.</p>';
+  const y = new Date(); y.setFullYear(y.getFullYear() - 1);
+  openModal(`<h2>Compras de ${esc(a.name)}</h2>
+    ${msg ? `<div class="alert info"><span class="ic">✅</span><div class="bd">${msg}</div></div>` : ''}
+    ${perf ? `<div class="kpis" style="margin-bottom:10px">
+      <div class="kpi"><b class="num">${eur(perf.put)}</b><span>Metido en total</span></div>
+      <div class="kpi"><b class="num ${perf.gain >= 0 ? 'up' : 'down'}">${perf.gain >= 0 ? '+' : ''}${eur(perf.gain)}</b><span>Ganancia (${pct(perf.gp)})</span></div>
+    </div>` : ''}
+    ${best && worst ? `<p class="help">🏆 Tu mejor compra: la del <b>${dateFmt(best.date)}</b> (${best.gp >= 0 ? '+' : ''}${pct(best.gp)}). La que peor va: la del <b>${dateFmt(worst.date)}</b> (${worst.gp >= 0 ? '+' : ''}${pct(worst.gp)}). Las que compraste cuando el mercado estaba bajo son las que más ganan.</p>` : ''}
+    ${mism > 0.01 ? `<div class="alert warn"><span class="ic">🧮</span><div class="bd">Tus compras apuntadas suman <b>${showNum(Math.round(perf.units * 100) / 100)}</b> participaciones, pero en la cuenta tienes <b>${showNum(a.units)}</b>. Puede faltar alguna compra o haber diferencias de precio. El saldo siempre usa las participaciones de la cuenta.</div></div>` : ''}
+    <div style="max-height:40vh;overflow:auto;margin-bottom:12px">${list}</div>
+
+    <h3>Añadir una compra pasada</h3>
+    <p class="help">Mira en MyInvestor tus movimientos y copia la fecha y el importe de cada compra. No cambia tus participaciones actuales: solo sirve para el gráfico.</p>
+    <div class="grid2">${txtField('Fecha', 'l-date', todayISO(), 'date')}${txtField('Importe (€)', 'l-amount', '', 'number')}</div>
+    ${txtField('Participaciones · opcional, si no se calculan con el precio de ese día', 'l-units', '', 'number')}
+    <button class="btn block" data-action="add-lot" data-id="${a.id}">Añadir compra</button>
+
+    <h3 style="margin-top:18px">Atajo: aportación cada mes</h3>
+    <p class="help">Si metías lo mismo cada mes, apúntalas todas de golpe.</p>
+    <div class="grid2">${txtField('Desde', 'd-from', `${y.getFullYear()}-${pad(y.getMonth()+1)}-01`, 'date')}${txtField('Hasta', 'd-to', todayISO(), 'date')}${txtField('Importe al mes (€)', 'd-amount', S.plan.spMonthly || '', 'number')}${txtField('Día del mes', 'd-day', 1, 'number')}</div>
+    <button class="btn ghost block" data-action="add-dca" data-id="${a.id}">Añadir aportaciones mensuales</button>
+    ${per.length ? `<div class="btnrow"><button class="btn danger block" data-action="clear-lots" data-id="${a.id}">Borrar todas las compras apuntadas</button></div>` : ''}
+    <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
 function buyForm(a) {
   const n = navOf(a.isin);
   openModal(`<h2>Compra de ${esc(a.name)}</h2>
@@ -987,18 +1068,41 @@ document.addEventListener('click', e => {
       const inv = numVal('f-invested');
       const isin = val('f-isin').trim().toUpperCase().replace(/\s/g, '') || null;
       const data = {name, entity: val('f-entity').trim(), type: val('f-type'), bucket: val('f-bucket'), balance: numVal('f-balance') ?? 0, rate: numVal('f-rate') ?? 0, invested: inv, isin, units: isin ? numVal('f-units') : null};
-      if (id) Object.assign(S.accounts.find(a => a.id === id), data); else S.accounts.push({id: uid(), ...data});
+      if (id) Object.assign(S.accounts.find(a => a.id === id), data); else S.accounts.push({id: uid(), lots: [], ...data});
       applyNavs(); closeModal(); commit(); break;
     }
     case 'del-acc':
       if (confirm('¿Eliminar esta cuenta? Las revisiones anteriores no se pierden.')) { S.accounts = S.accounts.filter(a => a.id !== id); closeModal(); commit(); }
       break;
+    case 'lots': lotsForm(S.accounts.find(a => a.id === id)); break;
+    case 'add-lot': {
+      const a = S.accounts.find(x => x.id === id); const amt = numVal('l-amount'); const d = val('l-date') || todayISO();
+      if (!a || !amt) { document.getElementById('l-amount')?.focus(); return; }
+      const u = numVal('l-units') || lotUnits(a.isin, d, amt);
+      (a.lots ||= []).push({id: uid(), date: d, amount: amt, units: u}); save(); render(); lotsForm(a, `Compra del ${dateFmt(d)} añadida.`); break;
+    }
+    case 'add-dca': {
+      const a = S.accounts.find(x => x.id === id); const amt = numVal('d-amount'); const from = val('d-from'), to = val('d-to') || todayISO();
+      const day = Math.min(28, Math.max(1, Math.round(numVal('d-day') || 1)));
+      if (!a || !amt || !from) { document.getElementById('d-amount')?.focus(); return; }
+      let [yy, mm] = from.split('-').map(Number); let n = 0;
+      while (true) {
+        const d = `${yy}-${pad(mm)}-${pad(day)}`;
+        if (d > to) break;
+        if (d >= from) { (a.lots ||= []).push({id: uid(), date: d, amount: amt, units: lotUnits(a.isin, d, amt)}); n++; }
+        mm++; if (mm > 12) { mm = 1; yy++; }
+        if (n > 600) break;
+      }
+      save(); render(); lotsForm(a, `${n} aportaciones de ${eur(amt)} añadidas.`); break;
+    }
+    case 'del-lot': { const a = S.accounts.find(x => x.id === id); a.lots = a.lots.filter(l => l.id !== el.dataset.lot); save(); render(); lotsForm(a); break; }
+    case 'clear-lots': { const a = S.accounts.find(x => x.id === id); if (confirm('¿Borrar todas las compras apuntadas de este fondo?')) { a.lots = []; save(); render(); lotsForm(a); } break; }
     case 'buy': buyForm(S.accounts.find(a => a.id === id)); break;
     case 'save-buy': {
       const a = S.accounts.find(x => x.id === id); const amt = numVal('b-amount');
       if (!a || !amt) { document.getElementById('b-amount')?.focus(); return; }
       const at = navAt(a.isin, val('b-date') || todayISO());
-      if (at) a.units = Math.round(((a.units || 0) + amt / at[1]) * 10000) / 10000;
+      if (at) { a.units = Math.round(((a.units || 0) + amt / at[1]) * 10000) / 10000; (a.lots ||= []).push({id: uid(), date: val('b-date') || todayISO(), amount: amt, units: Math.round(amt / at[1] * 10000) / 10000}); }
       else a.balance = round2(a.balance + amt);
       if (a.invested != null) a.invested = round2(a.invested + amt);
       applyNavs(); closeModal(); commit(); break;
