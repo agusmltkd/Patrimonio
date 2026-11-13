@@ -180,6 +180,35 @@ body.locked main,body.locked header.top,body.locked nav.tabs,body.locked #modal{
 #lock .logo{width:72px;height:72px;border-radius:18px;background:linear-gradient(145deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-size:34px}
 #lock .pin{width:180px;text-align:center;font-size:24px;letter-spacing:.4em;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);color:var(--text)}
 #lock .err{color:var(--bad);font-size:14px;min-height:18px}
+.tmap{position:relative;width:100%;height:250px;border-radius:14px;overflow:hidden;background:var(--line);margin-top:4px}
+.tmap .tile{position:absolute;border:2px solid var(--card);border-radius:10px;padding:8px 9px;color:#fff;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;justify-content:flex-end;text-align:left;font:inherit;transition:filter .15s}
+.tmap .tile:hover{filter:brightness(1.07)}
+.tmap .tile .tn{font-size:12px;opacity:.92;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tmap .tile .tv{font-size:16px;font-weight:750;letter-spacing:-.01em;line-height:1.15;font-variant-numeric:tabular-nums}
+.tmap .tile .te{position:absolute;top:7px;left:9px;font-size:15px}
+.tmap .tile.sm .tn,.tmap .tile.sm .te{display:none}.tmap .tile.sm .tv{font-size:13.5px}.tmap .tile.xs .tv,.tmap .tile.xs .tn{display:none}
+.mlegend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;font-size:13px}
+.mlegend span{display:inline-flex;align-items:center;gap:6px}
+.mlegend i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.carousel{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:2px 16px 6px;margin:0 -16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.carousel::-webkit-scrollbar{display:none}
+.acard{flex:0 0 86%;max-width:420px;scroll-snap-align:center;background:var(--card);border:1px solid var(--line);border-radius:18px;overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.acard .top{padding:14px 16px 12px;color:#fff;position:relative}
+.acard .top .bank{font-size:13px;opacity:.9;display:flex;justify-content:space-between;gap:8px}
+.acard .top .nm{font-size:16px;font-weight:700;margin-top:2px}
+.acard .top .bal{font-size:28px;font-weight:780;letter-spacing:-.02em;margin-top:8px;font-variant-numeric:tabular-nums}
+.acard .top .dl{display:inline-block;margin-top:4px;font-size:13px;font-weight:650;background:rgba(255,255,255,.2);padding:2px 9px;border-radius:99px}
+.acard .body{padding:10px 16px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.acard .spark{width:100%;height:56px;display:block}
+.acard .body .meta{font-size:13px;color:var(--muted)}
+.acard .acts{display:flex;gap:8px;margin-top:auto;padding-top:6px}
+.acard .acts .btn{flex:1;padding:9px 10px;font-size:14px}
+.cdots{display:flex;justify-content:center;gap:6px;margin:4px 0 12px}
+.cdots i{width:7px;height:7px;border-radius:50%;background:var(--line);transition:all .2s}
+.cdots i.on{background:var(--accent);width:18px;border-radius:99px}
+.sankey{width:100%;height:auto;display:block;overflow:visible}
+.sankey text{font-size:11px;fill:var(--text)}
+.sankey .amt{font-weight:700;font-variant-numeric:tabular-nums}
 .disclaimer{font-size:12px;color:var(--muted);text-align:center;margin:16px 4px 0}
 .split{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 </style>
@@ -585,23 +614,27 @@ function buildReport(key) {
   if (!start || start.date >= end.date) return null;
   const days = (new Date(end.date + 'T12:00:00') - new Date(start.date + 'T12:00:00')) / 864e5;
   let market = 0, interest = 0, bought = 0;
+  const gainB = {operativo:0, emergencia:0, casa:0, largo:0};
   for (const a of S.accounts) {
     const sb = start.balances?.[a.id];
+    let g = 0;
     if (a.isin) {
       const n0 = navAt(a.isin, start.date), n1 = navAt(a.isin, end.date);
-      if (n0 && n1 && sb != null) market += sb * (n1[1] / n0[1] - 1);
-      for (const l of (a.lots || [])) if (l.date > start.date && l.date <= end.date) { bought += l.amount; if (n1) market += l.units * n1[1] - l.amount; }
-    } else if (sb != null && a.rate > 0) interest += sb * a.rate / 100 * days / 365;
+      if (n0 && n1 && sb != null) { const m = sb * (n1[1] / n0[1] - 1); market += m; g += m; }
+      for (const l of (a.lots || [])) if (l.date > start.date && l.date <= end.date) { bought += l.amount; if (n1) { const m = l.units * n1[1] - l.amount; market += m; g += m; } }
+    } else if (sb != null && a.rate > 0) { const it = sb * a.rate / 100 * days / 365; interest += it; g += it; }
+    if (g) gainB[a.bucket] += g;   // la parte apartada como colchón es fija: lo ganado va a la hucha principal
   }
   const delta = end.total - start.total;
   const saved = delta - market - interest;
   const extraInc = S.income.filter(i => i.date > start.date && i.date <= end.date).reduce((s, i) => s + fin(i.amount), 0);
   const byB = {}; for (const k of BK) byB[k] = (end.byBucket?.[k] || 0) - (start.byBucket?.[k] || 0);
+  const ownB = {}; for (const k of BK) ownB[k] = byB[k] - gainB[k];
   const pay = paydaysBetween(start.date, end.date);
   const income = pay.total + extraInc;
   const spent = income - saved;
   const planned = fin(+S.plan.expenses) * Math.max(1, Math.round(days / 30.44));
-  return {key, start, end, days, delta, deltaPct: start.total ? delta / start.total * 100 : 0, market, interest, saved, bought, extraInc, byB, live: key === cur, pay, income, spent, planned};
+  return {key, start, end, days, delta, deltaPct: start.total ? delta / start.total * 100 : 0, market, interest, saved, bought, extraInc, byB, ownB, live: key === cur, pay, income, spent, planned};
 }
 function interestEstimate(a, year) {
   // Interés aproximado de 'a' en 'year' a partir de las revisiones mensuales
@@ -767,6 +800,7 @@ function reportForm(key) {
     <p class="small muted" style="margin:0">Tu dinero ha cambiado</p>
     <div class="delta-big num ${up ? 'up' : 'down'}">${up ? '+' : ''}${eur(r.delta)} <span class="small">(${up ? '+' : ''}${pct(r.deltaPct)})</span></div>
     <p style="margin:6px 0 12px">${msg}</p>
+    ${flowBlock(r)}
     <div class="kpis">
       <div class="kpi"><b class="num">${eur(r.saved)}</b><span>Has ahorrado tú${rate != null ? ` · ${pct(rate, 0)} de la nómina` : ''}</span></div>
       <div class="kpi"><b class="num ${r.market >= 0 ? 'up' : 'down'}">${r.market >= 0 ? '+' : ''}${eur(r.market)}</b><span>Te ha dado el mercado</span></div>
@@ -780,6 +814,60 @@ function reportForm(key) {
     ${bRows}
     <p class="note">"Has ahorrado" es el cambio total menos lo que han ganado o perdido tus fondos y los intereses. Para que el gasto salga bien: haz la revisión siempre el mismo día y apunta en Extras cualquier ingreso fuera de la nómina.</p>
     <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
+function sankeySVG(left, right) {
+  // left/right: [{label, value, color}] ; los dos lados suman lo mismo
+  left = left.filter(n => n.value >= 1); right = right.filter(n => n.value >= 1);
+  const total = Math.max(left.reduce((s, n) => s + n.value, 0), right.reduce((s, n) => s + n.value, 0), 1);
+  const W = 360, LX = 108, RX = 238, BW = 10, GAP = 10, MINH = 18, PT = 10;
+  const rows = Math.max(left.length, right.length);
+  const H = Math.max(150, rows * 48);
+  const lay = nodes => {
+    const avail = H - GAP * (nodes.length - 1);
+    let hs = nodes.map(n => n.value / total * avail);
+    const small = hs.filter(h => h < MINH).length, need = hs.reduce((s, h) => s + (h < MINH ? MINH - h : 0), 0);
+    const big = hs.filter(h => h >= MINH).reduce((s, h) => s + h, 0) || 1;
+    hs = hs.map(h => h < MINH ? MINH : h - need * h / big);
+    let y = PT; return nodes.map((n, i) => { const o = {...n, y, h: hs[i]}; y += hs[i] + GAP; return o; });
+  };
+  const L = lay(left), R = lay(right);
+  // reparto voraz: cada origen llena los destinos en orden
+  const lo = L.map(n => ({...n, rem: n.value, off: 0})), ro = R.map(n => ({...n, rem: n.value, off: 0}));
+  let bands = '', i = 0, j = 0;
+  while (i < lo.length && j < ro.length) {
+    const a = lo[i], b = ro[j]; const v = Math.min(a.rem, b.rem);
+    if (v > 0.5) {
+      const ha = v / a.value * a.h, hb = v / b.value * b.h;
+      const y0 = a.y + a.off, y1 = b.y + b.off, x0 = LX + BW, x1 = RX, cx = (x0 + x1) / 2;
+      bands += `<path d="M${x0},${y0}C${cx},${y0} ${cx},${y1} ${x1},${y1}L${x1},${y1 + hb}C${cx},${y1 + hb} ${cx},${y0 + ha} ${x0},${y0 + ha}Z" style="fill:${b.color}" opacity=".38"/>`;
+      a.off += ha; b.off += hb;
+    }
+    a.rem -= v; b.rem -= v;
+    if (a.rem <= 0.5) i++; if (b.rem <= 0.5) j++;
+  }
+  const node = (n, x, anchor, tx) => `<rect x="${x}" y="${n.y.toFixed(1)}" width="${BW}" height="${n.h.toFixed(1)}" rx="3" style="fill:${n.color}"/>
+    <text x="${tx}" y="${(n.y + n.h / 2 - 2).toFixed(1)}" text-anchor="${anchor}">${esc(n.label)}</text>
+    <text x="${tx}" y="${(n.y + n.h / 2 + 11).toFixed(1)}" text-anchor="${anchor}" class="amt">${eur(n.value)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H + PT * 2}" class="sankey" role="img" aria-label="Adónde ha ido tu dinero">${bands}${L.map(n => node(n, LX, 'end', LX - 6)).join('')}${R.map(n => node(n, RX, 'start', RX + BW + 6)).join('')}</svg>`;
+}
+function flowBlock(r) {
+  if (!r.pay.count && !r.extraInc) return '';
+  const left = [{label: r.pay.count > 1 ? `Nómina ×${r.pay.count}` : 'Nómina', value: r.pay.total, color: 'var(--accent)'}];
+  if (r.extraInc) left.push({label: 'Extra', value: r.extraInc, color: 'var(--warn)'});
+  const right = [];
+  if (r.spent > 0) right.push({label: 'Gastado', value: r.spent, color: 'var(--b-gastos)'});
+  else if (r.spent < 0) left.push({label: 'Sin apuntar', value: -r.spent, color: 'var(--b-operativo)'});
+  const order = ['largo', 'casa', 'emergencia', 'operativo'];
+  for (const k of order) {
+    const v = r.ownB[k];
+    if (Math.abs(v) < 10) continue;
+    if (v > 0) right.push({label: `${BUCKETS[k].em} ${BUCKETS[k].label}`, value: v, color: `var(--b-${k})`});
+    else if (v < 0) left.push({label: `↩ ${BUCKETS[k].label}`, value: -v, color: `var(--b-${k})`});
+  }
+  if (!right.length) return '';
+  return `<h3 style="margin:16px 0 6px">🔀 Adónde ha ido tu dinero</h3>
+    ${sankeySVG(left, right)}
+    <p class="help" style="margin-top:6px">A la izquierda, lo que ha entrado; a la derecha, adónde ha ido. Lo que han ganado tus fondos y los intereses no aparece: solo el dinero que has movido tú.${left.some(n => n.label.startsWith('↩')) ? ' Lo marcado con ↩ es dinero que has sacado de esa hucha para llevarlo a otra.' : ''}</p>`;
 }
 function spendBlock(r, keys) {
   if (!r.pay.count) return `<h3 style="margin:16px 0 4px">💳 Lo que has gastado</h3><p class="help">Entre estas dos revisiones no ha caído ninguna nómina (cobras el día ${S.plan.payday} de cada mes), así que aún no se puede calcular. Si no es tu día de cobro, cámbialo en Plan.</p>`;
@@ -970,44 +1058,127 @@ function fundsCard() {
   </section>`;
 }
 
+const BANK_COLORS = ['#2563eb', '#0f766e', '#7c3aed', '#c2410c', '#be185d', '#0891b2', '#4d7c0f', '#a16207'];
+function bankColor(name) { const list = [...new Set(S.accounts.map(a => a.entity || a.name))]; const i = list.indexOf(name); return BANK_COLORS[(i < 0 ? 0 : i) % BANK_COLORS.length]; }
+function squarify(items, x, y, w, h) {
+  // items: [{value,...}] ordenados de mayor a menor -> rectángulos en el área dada
+  const out = []; items = items.filter(it => it.value > 0);
+  const total = items.reduce((s, it) => s + it.value, 0); if (!total) return out;
+  const scale = w * h / total;
+  let rest = items.map(it => ({...it, area: it.value * scale}));
+  const worst = (row, side) => { const sum = row.reduce((s, r) => s + r.area, 0); const mx = Math.max(...row.map(r => r.area)), mn = Math.min(...row.map(r => r.area)); return Math.max(side * side * mx / (sum * sum), sum * sum / (side * side * mn)); };
+  while (rest.length) {
+    const side = Math.min(w, h); let row = [rest[0]], k = 1;
+    while (k < rest.length && worst([...row, rest[k]], side) <= worst(row, side)) { row.push(rest[k]); k++; }
+    rest = rest.slice(k);
+    const sum = row.reduce((s, r) => s + r.area, 0);
+    if (w >= h) { const cw = sum / h; let cy = y; for (const r of row) { const rh = r.area / cw; out.push({...r, x, y: cy, w: cw, h: rh}); cy += rh; } x += cw; w -= cw; }
+    else { const ch = sum / w; let cx = x; for (const r of row) { const rw = r.area / ch; out.push({...r, x: cx, y, w: rw, h: ch}); cx += rw; } y += ch; h -= ch; }
+  }
+  return out;
+}
+function moneyMap() {
+  const by = S.ui.mapBy === 'banco' ? 'banco' : 'hucha';
+  let items;
+  if (by === 'hucha') {
+    items = [];
+    for (const a of S.accounts) for (const [k, v] of Object.entries(accSplit(a))) if (v > 0) items.push({value: v, id: a.id, title: a.entity || a.name, sub: Object.keys(accSplit(a)).length > 1 ? BUCKETS[k].label : a.name, em: BUCKETS[k].em, color: `var(--b-${k})`});
+  } else {
+    const g = {};
+    for (const a of S.accounts) { const key = a.entity || a.name; (g[key] ||= {value: 0, id: a.id, title: key, names: []}); g[key].value += Math.max(0, a.balance); g[key].names.push(a.name); }
+    items = Object.values(g).map(x => ({...x, sub: x.names.length > 1 ? `${x.names.length} cuentas` : x.names[0], em: '🏦', color: bankColor(x.title)}));
+  }
+  items.sort((p, q) => q.value - p.value);
+  const total = items.reduce((s, it) => s + it.value, 0);
+  const AW = 132, AH = 100;   // proporción real del mapa (≈ 330 × 250 px)
+  const tiles = squarify(items, 0, 0, AW, AH).map(r => {
+    const t = {...r, x: r.x / AW * 100, w: r.w / AW * 100, y: r.y, h: r.h};
+    const wpx = r.w * 2.5, hpx = r.h * 2.5;
+    const cls = wpx < 64 || hpx < 34 ? 'xs' : hpx < 84 || wpx < 120 ? 'sm' : '';
+    return `<button class="tile ${cls}" style="left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%;background:${t.color}" data-action="goto-card" data-id="${t.id}" title="${esc(t.title)} · ${esc(t.sub)} · ${eur(t.value)}">
+      ${cls !== 'xs' ? `<span class="te">${t.em}</span>` : ''}<span class="tn">${esc(t.title)} · ${esc(t.sub)}</span><span class="tv">${eur(t.value)}</span><span class="tn">${pct(t.value / total * 100, 0)}</span></button>`;
+  }).join('');
+  const b = sums();
+  const legend = by === 'hucha'
+    ? BK.filter(k => b[k] > 0).map(k => `<span><i style="background:var(--b-${k})"></i>${BUCKETS[k].label} <b class="num">${eur(b[k])}</b></span>`).join('')
+    : items.map(it => `<span><i style="background:${it.color}"></i>${esc(it.title)} <b class="num">${eur(it.value)}</b></span>`).join('');
+  return `<section class="card">
+    <h2><span class="em">🗺️</span>Mapa de tu dinero</h2>
+      <div class="chips" style="margin:0"><button class="chip ${by === 'hucha' ? 'on' : ''}" data-action="map-by" data-v="hucha">Por hucha</button><button class="chip ${by === 'banco' ? 'on' : ''}" data-action="map-by" data-v="banco">Por banco</button></div>
+    <p class="help" style="margin:6px 0 8px">Cada bloque es más grande cuanto más dinero hay. Tócalo para ver la cuenta.</p>
+    ${total > 0 ? `<div class="tmap">${tiles}</div><div class="mlegend">${legend}</div>` : '<p class="empty">Aún no hay saldos.</p>'}
+  </section>`;
+}
+function accHistory(a) {
+  const pts = sortedSnaps().filter(x => x.balances && x.balances[a.id] != null).map(x => [x.date, x.balances[a.id]]);
+  const t = todayISO();
+  if (!pts.length || pts[pts.length - 1][0] !== t) pts.push([t, a.balance]); else pts[pts.length - 1][1] = a.balance;
+  return pts;
+}
+function sparkSVG(vals, color) {
+  if (vals.length < 2) return '';
+  const W = 300, H = 56, mn = Math.min(...vals), mx = Math.max(...vals), rg = mx - mn || Math.abs(mx) * 0.02 || 1;
+  const pts = vals.map((v, i) => [i * W / (vals.length - 1), H - 6 - (v - mn) / rg * (H - 12)]);
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="spark" preserveAspectRatio="none" aria-hidden="true"><path d="${d}L${W},${H}L0,${H}Z" style="fill:${color}" opacity=".12"/><path d="${d}" fill="none" style="stroke:${color}" stroke-width="2.2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/><circle cx="${pts[pts.length - 1][0]}" cy="${pts[pts.length - 1][1]}" r="3.5" style="fill:${color}"/></svg>`;
+}
+function accountCard(a) {
+  const sp = accSplit(a); const parts = Object.entries(sp).filter(([, v]) => v > 0);
+  const main = a.bucket; const color = `var(--b-${main})`;
+  const hist = accHistory(a);
+  let spark = '', sparkLabel = '';
+  const n = a.isin ? navOf(a.isin) : null;
+  if (a.isin && n && a.units > 0) {
+    const from = new Date(); from.setMonth(from.getMonth() - 6);
+    const fromISO = `${from.getFullYear()}-${pad(from.getMonth()+1)}-${pad(from.getDate())}`;
+    const h = fundHist(a.isin).filter(([d]) => d >= fromISO);
+    spark = sparkSVG(h.map(([, v]) => v * a.units), color); sparkLabel = 'Últimos 6 meses (con tus participaciones de hoy)';
+  } else if (hist.length >= 2) { spark = sparkSVG(hist.map(p => p[1]), color); sparkLabel = `Desde el ${dateFmt(hist[0][0])}`; }
+  const prev = hist.length >= 2 ? hist[hist.length - 2] : null;
+  const delta = prev ? a.balance - prev[1] : null;
+  const yearly = a.balance * a.rate / 100;
+  const gain = a.invested != null && a.invested > 0 ? a.balance - a.invested : null;
+  let info = [];
+  if (a.isin && n && a.units > 0) info.push(`${showNum(a.units)} participaciones × ${n.nav.toLocaleString('es-ES', {maximumFractionDigits:4})} €${n.change != null ? ` · <span class="${n.change >= 0 ? 'up' : 'down'}">${n.change >= 0 ? '+' : ''}${pct(n.change, 2)} hoy</span>` : ''}`);
+  else if (a.isin && !(a.units > 0)) info.push(`<span style="color:var(--warn)">Pon tus participaciones para que se actualice solo</span>`);
+  if (gain !== null) info.push(`Ganancia: <b class="${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : ''}${eur(gain)} (${pct(gain / a.invested * 100)})</b>`);
+  if (yearly >= 1) info.push(`${a.isin ? 'Se espera que gane' : 'Te da'} unos <b>${eur(yearly)} al año</b> (${pct(a.rate, a.rate % 1 ? 1 : 0)})`);
+  else if (!a.isin) info.push('No te da intereses');
+  if (a.type === 'remunerada' && a.rate > 0 && prev) {
+    const days = Math.max(0, (Date.now() - new Date(prev[0] + 'T12:00:00')) / 864e5);
+    const acc = prev[1] * a.rate / 100 * days / 365;
+    if (acc >= 0.5) info.push(`<span class="up">≈ +${eur(acc, 2)} de intereses desde el ${dateFmt(prev[0])}</span>`);
+  }
+  const splitBar = parts.length > 1 ? `<div class="stack" style="height:8px;margin:4px 0 2px">${parts.map(([k, v]) => `<i style="width:${v / a.balance * 100}%;background:var(--b-${k})"></i>`).join('')}</div>
+    <div class="meta">${parts.map(([k, v]) => `${BUCKETS[k].em} ${BUCKETS[k].label}: <b>${eur(v)}</b>`).join(' · ')}</div>` : `<div class="meta">${BUCKETS[main].em} ${BUCKETS[main].label}</div>`;
+  return `<article class="acard" id="card-${a.id}">
+    <div class="top" style="background:linear-gradient(135deg, ${color}, color-mix(in srgb, ${color} 65%, #000))">
+      <div class="bank"><span>${esc(a.entity || '—')}</span><span>${TYPES[a.type]}</span></div>
+      <div class="nm">${esc(a.name)}</div>
+      <div class="bal">${eur(a.balance, 0)}</div>
+      ${delta !== null && Math.abs(delta) >= 1 ? `<span class="dl">${delta >= 0 ? '▲ +' : '▼ '}${eur(delta)} desde el ${dateFmt(prev[0])}</span>` : `<span class="dl" style="opacity:.75">${hist.length < 2 ? 'Primera revisión' : 'Sin cambios'}</span>`}
+    </div>
+    <div class="body">
+      ${spark ? `${spark}<div class="meta" style="margin-top:-2px">${sparkLabel}</div>` : `<div class="meta">📈 Aquí verás cómo evoluciona tras la próxima revisión.</div>`}
+      ${splitBar}
+      ${info.map(x => `<div class="meta">${x}</div>`).join('')}
+      <div class="acts">
+        <button class="btn ghost" data-action="edit-acc" data-id="${a.id}">Editar</button>
+        ${a.isin ? `<button class="btn ghost" data-action="buy" data-id="${a.id}">➕ Compra</button><button class="btn ghost" data-action="sell" data-id="${a.id}">➖ Venta</button>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
 function viewCuentas() {
   const b = sums(); const total = BK.reduce((s, k) => s + b[k], 0);
-  const groups = BK.map(k => {
-    const acc = S.accounts.filter(a => a.bucket === k);
-    const reserved = k === 'emergencia' ? S.accounts.filter(a => a.bucket !== 'emergencia' && (accSplit(a).emergencia || 0) > 0) : [];
-    if (!acc.length && !reserved.length) return '';
-    return `<section class="card">
-      <div class="bucket-h"><h2 style="margin:0"><span class="em">${BUCKETS[k].em}</span>${BUCKETS[k].label}</h2><span class="num"><b>${eur(b[k])}</b></span></div>
-      <div class="small muted" style="margin-bottom:6px">${BUCKETS[k].desc}</div>
-      ${acc.map(a => {
-        const gain = a.invested != null && a.invested > 0 ? a.balance - a.invested : null;
-        const n = a.isin ? navOf(a.isin) : null;
-        let extra = '';
-        if (a.isin && n && a.units > 0) extra = `<div class="meta">${showNum(a.units)} part. × ${n.nav.toLocaleString('es-ES', {maximumFractionDigits:4})} € · ${dateFmt(n.date)}${n.change != null ? ` · <span class="${n.change >= 0 ? 'up' : 'down'}">${n.change >= 0 ? '+' : ''}${pct(n.change, 2)}</span>` : ''}</div>`;
-        else if (a.isin && !(a.units > 0)) extra = `<div class="meta" style="color:var(--warn)">Pon tus participaciones para que se actualice solo</div>`;
-        else if (a.isin && !n) extra = `<div class="meta">Esperando el primer precio…</div>`;
-        else if (a.type === 'remunerada' && a.rate > 0) {
-          const last = sortedSnaps().pop();
-          if (last && last.balances && last.balances[a.id] != null) {
-            const days = Math.max(0, (Date.now() - new Date(last.date + 'T12:00:00')) / 864e5);
-            const acc = last.balances[a.id] * a.rate / 100 * days / 365;
-            if (acc >= 0.5) extra = `<div class="meta up">≈ +${eur(acc, 2)} de intereses desde el ${dateFmt(last.date)}</div>`;
-          }
-        }
-        const res = accSplit(a).emergencia && a.bucket !== 'emergencia' ? accSplit(a).emergencia : 0;
-        if (res) extra += `<div class="meta">🛟 ${eur(res)} son tu colchón · ${eur(a.balance - res)} cuentan aquí</div>`;
-        return `<button class="acc" data-action="edit-acc" data-id="${a.id}">
-          <span><b>${esc(a.name)}</b><div class="meta">${esc(a.entity)}${a.entity ? ' · ' : ''}${TYPES[a.type]}${a.isin ? '' : ` · ${pct(a.rate, a.rate % 1 ? 1 : 0)}`}</div>${extra}</span>
-          <span class="r"><b class="num">${eur(res ? a.balance - res : a.balance, 0)}</b>${res ? `<div class="meta">de ${eur(a.balance)}</div>` : ''}${gain !== null ? `<div class="meta ${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : ''}${eur(gain)} (${pct(gain / a.invested * 100)})</div>` : ''}</span>
-        </button>`;
-      }).join('')}
-      ${reserved.map(a => `<button class="acc" data-action="edit-acc" data-id="${a.id}">
-          <span><b>${esc(a.name)}</b><div class="meta">${esc(a.entity)} · parte apartada de la cuenta · ${pct(a.rate, a.rate % 1 ? 1 : 0)}</div></span>
-          <span class="r"><b class="num">${eur(accSplit(a).emergencia, 0)}</b><div class="meta">de ${eur(a.balance)}</div></span>
-        </button>`).join('')}
-    </section>`;
-  }).join('');
+  const order = [...S.accounts].sort((x, y) => BK.indexOf(x.bucket) - BK.indexOf(y.bucket) || y.balance - x.balance);
   const snaps = sortedSnaps().reverse();
+  afterRender = () => {
+    const c = $('#carousel'); if (!c) return;
+    const dots = [...document.querySelectorAll('#cdots i')];
+    const upd = () => { const w = c.firstElementChild ? c.firstElementChild.getBoundingClientRect().width + 12 : 1; const i = Math.round(c.scrollLeft / w); dots.forEach((d, k) => d.classList.toggle('on', k === i)); };
+    c.addEventListener('scroll', () => requestAnimationFrame(upd), {passive: true}); upd();
+  };
   return `
   <section class="card">
     <h2><span class="em">🏦</span>Tus cuentas</h2>
@@ -1016,9 +1187,11 @@ function viewCuentas() {
       <button class="btn" data-action="update-bal">Actualizar saldos</button>
       <button class="btn ghost" data-action="add-acc">Añadir cuenta</button>
     </div>
-    <span class="note">Una vez al mes, pulsa <b>Actualizar saldos</b> y pon lo que tienes en cada cuenta. Así la app sabe cómo vas. Toca una cuenta para editarla o cambiarla de hucha.</span>
+    <span class="note">Una vez al mes, pulsa <b>Actualizar saldos</b> y pon lo que tienes en cada cuenta. Así la app sabe cómo vas.</span>
   </section>
-  ${groups || '<p class="empty">No tienes cuentas. Añade la primera.</p>'}
+  ${S.accounts.length ? moneyMap() : ''}
+  ${S.accounts.length ? `<div class="carousel" id="carousel">${order.map(accountCard).join('')}</div>
+  <div class="cdots" id="cdots">${order.map(() => '<i></i>').join('')}</div>` : '<p class="empty">No tienes cuentas. Añade la primera.</p>'}
   ${fundsCard()}
   <section class="card">
     <h2><span class="em">🗓️</span>Revisiones mensuales</h2>
@@ -1582,6 +1755,8 @@ document.addEventListener('click', e => {
     case 'renta': rentaForm(el.dataset.v ? +el.dataset.v : null); break;
     case 'infl': inflForm(); break;
     case 'res-target': { const f = document.getElementById('f-reserve'); if (f) f.value = showNum(S.plan.emergencyTarget); break; }
+    case 'map-by': S.ui.mapBy = el.dataset.v; commit(); break;
+    case 'goto-card': { const c = document.getElementById('card-' + id); const box = $('#carousel'); if (c && box) { box.scrollTo({left: c.offsetLeft - box.offsetLeft - (box.clientWidth - c.clientWidth) / 2, behavior: 'smooth'}); c.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } break; }
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
     case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
