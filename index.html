@@ -255,10 +255,18 @@ const TYPES = {corriente:'Cuenta corriente', remunerada:'Cuenta remunerada', mon
 const STATUS = {idea:'Idea', validando:'Validando', marcha:'En marcha', pausa:'En pausa', descartado:'Descartado'};
 
 /* ---------- estado ---------- */
+function accSplit(a) {
+  // Reparte el saldo de una cuenta entre huchas: la parte apartada va a Emergencias y el resto a su hucha
+  const bal = fin(a.balance);
+  const res = a.bucket !== 'emergencia' && !a.isin ? Math.min(Math.max(0, fin(a.reserve)), Math.max(0, bal)) : 0;
+  const out = {}; if (res > 0) out.emergencia = res;
+  out[a.bucket] = (out[a.bucket] || 0) + bal - res;
+  return out;
+}
 function makeSnapshot(s, date) {
   const balances = {}, byBucket = {operativo:0, emergencia:0, casa:0, largo:0};
   let total = 0;
-  for (const a of s.accounts) { balances[a.id] = a.balance; byBucket[a.bucket] = (byBucket[a.bucket]||0) + a.balance; total += a.balance; }
+  for (const a of s.accounts) { balances[a.id] = a.balance; for (const [k, v] of Object.entries(accSplit(a))) byBucket[k] = (byBucket[k]||0) + v; total += a.balance; }
   return {date, balances, byBucket, total};
 }
 function defaults() {
@@ -311,6 +319,7 @@ function normalize(s) {
     bucket: BUCKETS[a.bucket] ? a.bucket : 'operativo', balance: fin(+a.balance), rate: fin(+a.rate),
     invested: (a.invested === null || a.invested === '' || a.invested === undefined) ? null : fin(+a.invested),
     isin: a.isin ? String(a.isin).trim().toUpperCase() : null,
+    reserve: Math.max(0, fin(+a.reserve)),
     units: (a.units === null || a.units === '' || a.units === undefined) ? null : fin(+a.units),
     sales: Array.isArray(a.sales) ? a.sales.filter(x => x && x.date) : [],
     lots: Array.isArray(a.lots) ? a.lots.filter(l => l && l.date && fin(+l.amount) > 0).map(l => ({id: l.id || uid(), date: l.date, amount: fin(+l.amount), units: fin(+l.units)})) : []
@@ -405,14 +414,13 @@ const setPath = (p, v) => { const ks = p.split('.'); const last = ks.pop(); ks.r
 /* ---------- cálculos ---------- */
 function sums() {
   const b = {operativo:0, emergencia:0, casa:0, largo:0};
-  for (const a of S.accounts) b[a.bucket] += a.balance;
+  for (const a of S.accounts) for (const [k, v] of Object.entries(accSplit(a))) b[k] += v;
   return b;
 }
 function bucketRate(k) {
-  const acc = S.accounts.filter(a => a.bucket === k);
-  const tot = acc.reduce((s, a) => s + a.balance, 0);
-  if (!tot) return FALLBACK_RATE[k];
-  return acc.reduce((s, a) => s + a.balance * a.rate, 0) / tot;
+  let tot = 0, w = 0;
+  for (const a of S.accounts) { const v = accSplit(a)[k] || 0; tot += v; w += v * a.rate; }
+  return tot ? w / tot : FALLBACK_RATE[k];
 }
 const sortedSnaps = () => [...S.snapshots].sort((a, b) => a.date.localeCompare(b.date));
 function sideAvg() {
@@ -533,7 +541,7 @@ function buildAlerts(b, sim) {
   if (b.emergencia < p.emergencyTarget) {
     const falta = p.emergencyTarget - b.emergencia;
     out.push({t:'info', ic:'🛟', h: b.emergencia === 0
-      ? `<b>Aún no tienes colchón de emergencias.</b> La idea es apartar ${eur(p.emergencyTarget)} para imprevistos. Puedes abrir una cuenta para eso o marcar una que ya tengas como "Emergencias".`
+      ? `<b>Aún no tienes colchón de emergencias.</b> La idea es apartar ${eur(p.emergencyTarget)} para imprevistos. No hace falta otra cuenta: toca tu cuenta remunerada y di qué parte del saldo es colchón.`
       : `<b>Tu colchón de emergencias va por ${eur(b.emergencia)}.</b> Te faltan ${eur(falta)} para llegar a ${eur(p.emergencyTarget)}.`, btn:['Organizar cuentas', 'goto:cuentas']});
   }
   if (sim.eta !== null && sim.eta <= 36 && S.accounts.some(a => a.bucket === 'casa' && a.type === 'indexado')) {
@@ -966,7 +974,8 @@ function viewCuentas() {
   const b = sums(); const total = BK.reduce((s, k) => s + b[k], 0);
   const groups = BK.map(k => {
     const acc = S.accounts.filter(a => a.bucket === k);
-    if (!acc.length) return '';
+    const reserved = k === 'emergencia' ? S.accounts.filter(a => a.bucket !== 'emergencia' && (accSplit(a).emergencia || 0) > 0) : [];
+    if (!acc.length && !reserved.length) return '';
     return `<section class="card">
       <div class="bucket-h"><h2 style="margin:0"><span class="em">${BUCKETS[k].em}</span>${BUCKETS[k].label}</h2><span class="num"><b>${eur(b[k])}</b></span></div>
       <div class="small muted" style="margin-bottom:6px">${BUCKETS[k].desc}</div>
@@ -985,11 +994,17 @@ function viewCuentas() {
             if (acc >= 0.5) extra = `<div class="meta up">≈ +${eur(acc, 2)} de intereses desde el ${dateFmt(last.date)}</div>`;
           }
         }
+        const res = accSplit(a).emergencia && a.bucket !== 'emergencia' ? accSplit(a).emergencia : 0;
+        if (res) extra += `<div class="meta">🛟 ${eur(res)} son tu colchón · ${eur(a.balance - res)} cuentan aquí</div>`;
         return `<button class="acc" data-action="edit-acc" data-id="${a.id}">
           <span><b>${esc(a.name)}</b><div class="meta">${esc(a.entity)}${a.entity ? ' · ' : ''}${TYPES[a.type]}${a.isin ? '' : ` · ${pct(a.rate, a.rate % 1 ? 1 : 0)}`}</div>${extra}</span>
-          <span class="r"><b class="num">${eur(a.balance, 0)}</b>${gain !== null ? `<div class="meta ${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : ''}${eur(gain)} (${pct(gain / a.invested * 100)})</div>` : ''}</span>
+          <span class="r"><b class="num">${eur(res ? a.balance - res : a.balance, 0)}</b>${res ? `<div class="meta">de ${eur(a.balance)}</div>` : ''}${gain !== null ? `<div class="meta ${gain >= 0 ? 'up' : 'down'}">${gain >= 0 ? '+' : ''}${eur(gain)} (${pct(gain / a.invested * 100)})</div>` : ''}</span>
         </button>`;
       }).join('')}
+      ${reserved.map(a => `<button class="acc" data-action="edit-acc" data-id="${a.id}">
+          <span><b>${esc(a.name)}</b><div class="meta">${esc(a.entity)} · parte apartada de la cuenta · ${pct(a.rate, a.rate % 1 ? 1 : 0)}</div></span>
+          <span class="r"><b class="num">${eur(accSplit(a).emergencia, 0)}</b><div class="meta">de ${eur(a.balance)}</div></span>
+        </button>`).join('')}
     </section>`;
   }).join('');
   const snaps = sortedSnaps().reverse();
@@ -1408,6 +1423,10 @@ function accForm(a) {
       ${txtField('Saldo (€)', 'f-balance', a.balance, 'number', 'inputmode="decimal" step="any"')}
       ${txtField('Interés anual (%)', 'f-rate', a.rate, 'number', 'inputmode="decimal" step="any"')}
     </div>
+    <div id="f-res-wrap" style="${a.bucket === 'emergencia' || a.isin ? 'display:none' : ''}">
+      ${txtField('De este saldo, ¿cuánto es colchón de emergencias? (€)', 'f-reserve', a.reserve || '', 'number', 'placeholder="0"')}
+      <p class="help" style="margin-top:-4px">Esa parte cuenta en la hucha Emergencias y el resto en la que elijas arriba. El dinero no se mueve: es solo cómo lo cuentas. <button type="button" class="chip" data-action="res-target">Usar mi objetivo (${eur(S.plan.emergencyTarget)})</button></p>
+    </div>
     <div class="grid2">
       ${txtField('ISIN (solo fondos)', 'f-isin', a.isin || '', 'text', 'placeholder="Ej. IE00BYX5MX67" autocapitalize="characters" spellcheck="false"')}
       ${txtField('Participaciones', 'f-units', a.units ?? '', 'number', 'placeholder="Ej. 123,4567"')}
@@ -1417,6 +1436,8 @@ function accForm(a) {
     <div class="btnrow"><button class="btn" data-action="save-acc" data-id="${a.id || ''}">Guardar</button><button class="btn ghost" data-action="close">Cancelar</button></div>
     ${!isNew && a.isin ? `<div class="btnrow"><button class="btn ghost" data-action="buy" data-id="${a.id}">➕ Compra</button><button class="btn ghost" data-action="sell" data-id="${a.id}">➖ Venta o traspaso</button></div>` : ''}
     ${isNew ? '' : `<div class="btnrow"><button class="btn danger block" data-action="del-acc" data-id="${a.id}">Eliminar cuenta</button></div>`}`);
+  const tg = () => { $('#f-res-wrap').style.display = $('#f-bucket').value === 'emergencia' || val('f-isin').trim() ? 'none' : ''; };
+  $('#f-bucket').addEventListener('change', tg); $('#f-isin').addEventListener('input', tg);
 }
 function lotsForm(a, msg) {
   const perf = fundPerf(a);
@@ -1560,6 +1581,7 @@ document.addEventListener('click', e => {
     case 'lock-test': lockNow(); tryBio(); break;
     case 'renta': rentaForm(el.dataset.v ? +el.dataset.v : null); break;
     case 'infl': inflForm(); break;
+    case 'res-target': { const f = document.getElementById('f-reserve'); if (f) f.value = showNum(S.plan.emergencyTarget); break; }
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
     case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
@@ -1571,7 +1593,7 @@ document.addEventListener('click', e => {
       if (!name) { document.getElementById('f-name').focus(); return; }
       const inv = numVal('f-invested');
       const isin = val('f-isin').trim().toUpperCase().replace(/\s/g, '') || null;
-      const data = {name, entity: val('f-entity').trim(), type: val('f-type'), bucket: val('f-bucket'), balance: numVal('f-balance') ?? 0, rate: numVal('f-rate') ?? 0, invested: inv, isin, units: isin ? numVal('f-units') : null};
+      const data = {name, entity: val('f-entity').trim(), type: val('f-type'), bucket: val('f-bucket'), balance: numVal('f-balance') ?? 0, rate: numVal('f-rate') ?? 0, invested: inv, isin, units: isin ? numVal('f-units') : null, reserve: isin || val('f-bucket') === 'emergencia' ? 0 : Math.max(0, numVal('f-reserve') || 0)};
       if (id) Object.assign(S.accounts.find(a => a.id === id), data); else S.accounts.push({id: uid(), lots: [], ...data});
       applyNavs(); closeModal(); commit(); break;
     }
