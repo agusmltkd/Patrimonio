@@ -180,6 +180,34 @@ body.locked main,body.locked header.top,body.locked nav.tabs,body.locked #modal{
 #lock .logo{width:72px;height:72px;border-radius:18px;background:linear-gradient(145deg,var(--accent),var(--accent-2));display:grid;place-items:center;font-size:34px}
 #lock .pin{width:180px;text-align:center;font-size:24px;letter-spacing:.4em;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card);color:var(--text)}
 #lock .err{color:var(--bad);font-size:14px;min-height:18px}
+.ring-wrap{position:relative;width:min(250px,72vw);aspect-ratio:1;margin:6px auto 4px}
+.ring{width:100%;height:100%;display:block;overflow:visible}
+.ring .seg{cursor:pointer;transition:opacity .25s, transform .25s;transform-origin:50% 50%;filter:drop-shadow(0 3px 6px rgba(0,0,0,.12))}
+.ring.has-sel .seg{opacity:.28}
+.ring.has-sel .seg.sel{opacity:1;transform:scale(1.045)}
+.ring .seg{stroke-dasharray:var(--len) 999;stroke-dashoffset:var(--len);animation:ringIn .9s cubic-bezier(.2,.8,.2,1) forwards;animation-delay:var(--d)}
+@keyframes ringIn{to{stroke-dashoffset:0}}
+@media (prefers-reduced-motion:reduce){.ring .seg{animation:none;stroke-dashoffset:0}}
+.ring-center{position:absolute;inset:22%;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;pointer-events:none;background:radial-gradient(circle at 50% 35%, var(--card), color-mix(in srgb, var(--bg) 70%, var(--card)));box-shadow:inset 0 2px 10px rgba(0,0,0,.05)}
+.ring-center .rc-em{font-size:24px;line-height:1;margin-bottom:4px}
+.ring-center .rc-l{font-size:12.5px;color:var(--muted);max-width:90%;line-height:1.25}
+.ring-center .rc-v{font-size:24px;font-weight:780;letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.15}
+.ring-center .rc-p{font-size:12.5px;font-weight:650;margin-top:2px}
+.seg-toggle{display:flex;background:var(--bg);border-radius:12px;padding:3px;gap:3px;margin:2px 0 6px}
+.seg-toggle button{flex:1;border:0;background:none;color:var(--muted);font:inherit;font-weight:650;font-size:14px;padding:8px 6px;border-radius:9px;cursor:pointer;transition:all .2s}
+.seg-toggle button.on{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.mrow{display:grid;grid-template-columns:42px 1fr auto;gap:12px;align-items:center;width:100%;padding:10px 6px;border:0;background:none;color:inherit;font:inherit;text-align:left;border-radius:14px;cursor:pointer;transition:background .2s}
+.mrow:hover,.mrow.sel{background:color-mix(in srgb, var(--c) 10%, transparent)}
+.mrow .ico{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;font-size:20px;background:color-mix(in srgb, var(--c) 16%, transparent)}
+.mrow .nm{font-weight:650;font-size:15px}
+.mono{font-weight:800;font-size:15px;letter-spacing:.02em;color:var(--c, var(--accent))}
+.ring-center .rc-em .mono{font-size:18px;color:var(--text)}
+.mrow .sb{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mrow .mb{height:5px;border-radius:99px;background:var(--line);margin-top:6px;overflow:hidden}
+.mrow .mb i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg, var(--c), color-mix(in srgb, var(--c) 70%, #fff))}
+.mrow .r{text-align:right}
+.mrow .r b{font-size:15px;font-variant-numeric:tabular-nums;display:block}
+.mrow .r span{font-size:12.5px;color:var(--muted)}
 .tmap{position:relative;width:100%;height:250px;border-radius:14px;overflow:hidden;background:var(--line);margin-top:4px}
 .tmap .tile{position:absolute;border:2px solid var(--card);border-radius:10px;padding:8px 9px;color:#fff;overflow:hidden;cursor:pointer;display:flex;flex-direction:column;justify-content:flex-end;text-align:left;font:inherit;transition:filter .15s}
 .tmap .tile:hover{filter:brightness(1.07)}
@@ -1077,36 +1105,75 @@ function squarify(items, x, y, w, h) {
   }
   return out;
 }
+let mapSel = -1;
+function moneyGroups() {
+  const by = S.ui.mapBy === 'banco' ? 'banco' : 'hucha';
+  if (by === 'hucha') {
+    const b = sums();
+    return BK.filter(k => b[k] > 0).map(k => {
+      const parts = [];
+      for (const a of S.accounts) { const v = accSplit(a)[k] || 0; if (v > 0) parts.push([a, v]); }
+      parts.sort((x, y) => y[1] - x[1]);
+      return {key: k, label: BUCKETS[k].label, em: BUCKETS[k].em, color: `var(--b-${k})`, value: b[k], id: parts[0]?.[0].id,
+        sub: parts.map(([a, v]) => `${a.entity || a.name} ${eur(v)}`).join(' · ')};
+    }).sort((x, y) => y.value - x.value);
+  }
+  const g = {};
+  for (const a of S.accounts) { const key = a.entity || a.name; (g[key] ||= {key, label: key, em: '🏦', value: 0, id: a.id, names: []}); g[key].value += Math.max(0, a.balance); g[key].names.push(a.name); }
+  const ini = t => { const caps = (t.match(/[A-ZÁÉÍÓÚÑ]/g) || []); return (caps.length >= 2 ? caps.slice(0, 2).join('') : t.slice(0, 2)).toUpperCase(); };
+  return Object.values(g).filter(x => x.value > 0).map(x => ({...x, em: `<span class="mono">${esc(ini(x.label))}</span>`, color: bankColor(x.label), sub: x.names.join(' · ')})).sort((x, y) => y.value - x.value);
+}
+function ringSVG(groups, total) {
+  const C = 120, R = 92, SW = 30, GAPDEG = groups.length > 1 ? 3 : 0;
+  let ang = -90;
+  const arc = (a0, a1) => {
+    const p = a => [C + R * Math.cos(a * Math.PI / 180), C + R * Math.sin(a * Math.PI / 180)];
+    const [x0, y0] = p(a0), [x1, y1] = p(a1);
+    return `M${x0.toFixed(2)},${y0.toFixed(2)}A${R},${R} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(2)},${y1.toFixed(2)}`;
+  };
+  const defs = groups.map((g, i) => `<linearGradient id="rg${i}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb, ${g.color} 75%, #fff)"/><stop offset="1" style="stop-color:${g.color}"/></linearGradient>`).join('');
+  const segs = groups.map((g, i) => {
+    const sweep = g.value / total * 360;
+    const capDeg = (SW / 2) / R * 180 / Math.PI;           // lo que sobresale el extremo redondeado
+    let a0 = ang + GAPDEG / 2 + capDeg, a1 = ang + sweep - GAPDEG / 2 - capDeg, cap = 'round';
+    if (a1 - a0 < 1) { a0 = ang + GAPDEG / 2; a1 = ang + Math.max(sweep - GAPDEG / 2, GAPDEG / 2 + 0.6); cap = 'butt'; }
+    ang += sweep;
+    const len = (a1 - a0) * Math.PI / 180 * R;
+    const full = groups.length === 1;
+    const d = full ? `M${C},${C - R}A${R},${R} 0 1 1 ${C - 0.01},${C - R}` : arc(a0, a1);
+    return `<path class="seg" data-action="seg" data-v="${i}" d="${d}" fill="none" stroke="url(#rg${i})" stroke-width="${SW}" stroke-linecap="${full ? 'butt' : cap}" style="--len:${(full ? 2 * Math.PI * R : len).toFixed(1)};--d:${(i * 0.12).toFixed(2)}s"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 240 240" class="ring" id="ring" role="img" aria-label="Reparto de tu dinero"><defs>${defs}</defs><circle cx="${C}" cy="${C}" r="${R}" fill="none" style="stroke:var(--line)" stroke-width="${SW}" opacity=".5"/>${segs}</svg>`;
+}
+function ringCenter(groups, total, i) {
+  if (i < 0 || !groups[i]) return `<div class="rc-l">Todo tu dinero</div><div class="rc-v">${eur(total)}</div><div class="rc-l" style="margin-top:4px">Toca una parte</div>`;
+  const g = groups[i];
+  return `<div class="rc-em">${g.em}</div><div class="rc-l">${esc(g.label)}</div><div class="rc-v">${eur(g.value)}</div><div class="rc-p" style="color:${g.color}">${pct(g.value / total * 100, 0)}</div>`;
+}
+function selectSeg(i) {
+  const groups = moneyGroups(), total = groups.reduce((s, g) => s + g.value, 0);
+  mapSel = mapSel === i ? -1 : i;
+  $('#ring')?.classList.toggle('has-sel', mapSel >= 0);
+  document.querySelectorAll('#ring .seg').forEach(el => el.classList.toggle('sel', +el.dataset.v === mapSel));
+  document.querySelectorAll('.mrow').forEach(el => el.classList.toggle('sel', +el.dataset.v === mapSel));
+  const c = $('#ringCenter'); if (c) c.innerHTML = ringCenter(groups, total, mapSel);
+}
 function moneyMap() {
   const by = S.ui.mapBy === 'banco' ? 'banco' : 'hucha';
-  let items;
-  if (by === 'hucha') {
-    items = [];
-    for (const a of S.accounts) for (const [k, v] of Object.entries(accSplit(a))) if (v > 0) items.push({value: v, id: a.id, title: a.entity || a.name, sub: Object.keys(accSplit(a)).length > 1 ? BUCKETS[k].label : a.name, em: BUCKETS[k].em, color: `var(--b-${k})`});
-  } else {
-    const g = {};
-    for (const a of S.accounts) { const key = a.entity || a.name; (g[key] ||= {value: 0, id: a.id, title: key, names: []}); g[key].value += Math.max(0, a.balance); g[key].names.push(a.name); }
-    items = Object.values(g).map(x => ({...x, sub: x.names.length > 1 ? `${x.names.length} cuentas` : x.names[0], em: '🏦', color: bankColor(x.title)}));
-  }
-  items.sort((p, q) => q.value - p.value);
-  const total = items.reduce((s, it) => s + it.value, 0);
-  const AW = 132, AH = 100;   // proporción real del mapa (≈ 330 × 250 px)
-  const tiles = squarify(items, 0, 0, AW, AH).map(r => {
-    const t = {...r, x: r.x / AW * 100, w: r.w / AW * 100, y: r.y, h: r.h};
-    const wpx = r.w * 2.5, hpx = r.h * 2.5;
-    const cls = wpx < 64 || hpx < 34 ? 'xs' : hpx < 84 || wpx < 120 ? 'sm' : '';
-    return `<button class="tile ${cls}" style="left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%;background:${t.color}" data-action="goto-card" data-id="${t.id}" title="${esc(t.title)} · ${esc(t.sub)} · ${eur(t.value)}">
-      ${cls !== 'xs' ? `<span class="te">${t.em}</span>` : ''}<span class="tn">${esc(t.title)} · ${esc(t.sub)}</span><span class="tv">${eur(t.value)}</span><span class="tn">${pct(t.value / total * 100, 0)}</span></button>`;
-  }).join('');
-  const b = sums();
-  const legend = by === 'hucha'
-    ? BK.filter(k => b[k] > 0).map(k => `<span><i style="background:var(--b-${k})"></i>${BUCKETS[k].label} <b class="num">${eur(b[k])}</b></span>`).join('')
-    : items.map(it => `<span><i style="background:${it.color}"></i>${esc(it.title)} <b class="num">${eur(it.value)}</b></span>`).join('');
+  const groups = moneyGroups(); const total = groups.reduce((s, g) => s + g.value, 0);
+  if (mapSel >= groups.length) mapSel = -1;
+  const max = Math.max(...groups.map(g => g.value), 1);
+  const rows = groups.map((g, i) => `<button class="mrow ${i === mapSel ? 'sel' : ''}" style="--c:${g.color}" data-action="seg" data-v="${i}">
+      <span class="ico">${g.em}</span>
+      <span style="min-width:0"><div class="nm">${esc(g.label)}</div><div class="sb">${esc(g.sub)}</div><div class="mb"><i style="width:${g.value / max * 100}%"></i></div></span>
+      <span class="r"><b>${eur(g.value)}</b><span>${pct(g.value / total * 100, 0)}</span></span>
+    </button>`).join('');
   return `<section class="card">
-    <h2><span class="em">🗺️</span>Mapa de tu dinero</h2>
-      <div class="chips" style="margin:0"><button class="chip ${by === 'hucha' ? 'on' : ''}" data-action="map-by" data-v="hucha">Por hucha</button><button class="chip ${by === 'banco' ? 'on' : ''}" data-action="map-by" data-v="banco">Por banco</button></div>
-    <p class="help" style="margin:6px 0 8px">Cada bloque es más grande cuanto más dinero hay. Tócalo para ver la cuenta.</p>
-    ${total > 0 ? `<div class="tmap">${tiles}</div><div class="mlegend">${legend}</div>` : '<p class="empty">Aún no hay saldos.</p>'}
+    <h2><span class="em">🧭</span>Dónde está tu dinero</h2>
+    <div class="seg-toggle"><button class="${by === 'hucha' ? 'on' : ''}" data-action="map-by" data-v="hucha">Por hucha</button><button class="${by === 'banco' ? 'on' : ''}" data-action="map-by" data-v="banco">Por banco</button></div>
+    ${total > 0 ? `<div class="ring-wrap">${ringSVG(groups, total)}<div class="ring-center" id="ringCenter">${ringCenter(groups, total, mapSel)}</div></div>
+    <div style="margin-top:6px">${rows}</div>
+    <p class="help" style="margin:8px 0 0;text-align:center">Toca una parte para verla · toca otra vez para ver todo</p>` : '<p class="empty">Aún no hay saldos.</p>'}
   </section>`;
 }
 function accHistory(a) {
@@ -1755,7 +1822,8 @@ document.addEventListener('click', e => {
     case 'renta': rentaForm(el.dataset.v ? +el.dataset.v : null); break;
     case 'infl': inflForm(); break;
     case 'res-target': { const f = document.getElementById('f-reserve'); if (f) f.value = showNum(S.plan.emergencyTarget); break; }
-    case 'map-by': S.ui.mapBy = el.dataset.v; commit(); break;
+    case 'map-by': S.ui.mapBy = el.dataset.v; mapSel = -1; commit(); break;
+    case 'seg': selectSeg(+el.dataset.v); break;
     case 'goto-card': { const c = document.getElementById('card-' + id); const box = $('#carousel'); if (c && box) { box.scrollTo({left: c.offsetLeft - box.offsetLeft - (box.clientWidth - c.clientWidth) / 2, behavior: 'smooth'}); c.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } break; }
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
