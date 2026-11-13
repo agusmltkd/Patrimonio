@@ -1801,7 +1801,15 @@ function merchantKey(t) {
     .replace(/[*#,.:;]+/g, ' ').replace(/\s+/g, ' ').trim();
   return x.split(' ').slice(0, 3).join(' ') || normTxt(t).slice(0, 24);
 }
-const txKey = t => merchantKey(t.concept || t.detail || '');
+const txKey = t => {
+  // Si el concepto es genérico (transferencia, Bizum, recibo…), se distingue por el detalle u observaciones
+  const c = normTxt(t.concept);
+  if (!c || /^(TRANSFERENCIA|BIZUM|RECIBO|ADEUDO|TRASPASO|INGRESO|DEVOLUCION|CARGO|ABONO|PAGO)( (REALIZADA|RECIBIDA|EMITIDA|ENVIADO|RECIBIDO|INMEDIATA|SEPA))*$/.test(c)) {
+    const extra = String(t.detail || '').split(' · ').slice(1).join(' ') || t.detail || '';
+    return (c.split(' ')[0] || 'MOV') + ' ' + merchantKey(extra);
+  }
+  return merchantKey(t.concept);
+};
 function autoCat(tx) {
   const key = txKey(tx);
   if (S.catRules[key]) return S.catRules[key];
@@ -1877,9 +1885,10 @@ function detectMap(rows) {
     const ai = h.findIndex(c => /IMPORTE|CANTIDAD|^MONTO/.test(c));
     if (fd >= 0 && ai >= 0) {
       const ci = h.findIndex(c => /CONCEPTO|DESCRIPCION/.test(c));
-      const di = h.findIndex((c, i) => i !== ci && /MOVIMIENTO|OBSERVACION|DETALLE|BENEFICIARIO/.test(c));
+      const di = h.findIndex((c, i) => i !== ci && /MOVIMIENTO|DETALLE|BENEFICIARIO/.test(c));
+      const oi = h.findIndex((c, i) => i !== ci && i !== di && /OBSERVACION|COMENTARIO|NOTAS?$/.test(c));
       const bi = h.findIndex(c => /DISPONIBLE|SALDO/.test(c));
-      return {header: r, date: fd, concept: ci >= 0 ? ci : h.findIndex((c, i) => i !== fd && i !== ai && c), detail: di, amount: ai, balance: bi};
+      return {header: r, date: fd, concept: ci >= 0 ? ci : h.findIndex((c, i) => i !== fd && i !== ai && c), detail: di >= 0 ? di : oi, obs: di >= 0 ? oi : -1, amount: ai, balance: bi};
     }
   }
   // sin cabecera: deducir por el contenido
@@ -1887,7 +1896,7 @@ function detectMap(rows) {
   const score = (fn) => [...Array(n).keys()].map(i => sample.filter(r => fn(r[i])).length);
   const ds = score(v => !!parseDateAny(v)), ns = score(v => parseNumES(v) != null && !parseDateAny(v)), ts = score(v => typeof v === 'string' && /[A-Za-z]{3,}/.test(v));
   const date = ds.indexOf(Math.max(...ds)), amount = ns.indexOf(Math.max(...ns)), concept = ts.indexOf(Math.max(...ts));
-  return {header: -1, date, concept, detail: -1, amount, balance: -1};
+  return {header: -1, date, concept, detail: -1, obs: -1, amount, balance: -1};
 }
 function rowsToTx(rows, m) {
   const out = [], seen = {};
@@ -1895,7 +1904,8 @@ function rowsToTx(rows, m) {
     const row = rows[r]; if (!row) continue;
     const date = parseDateAny(row[m.date]); const amount = parseNumES(row[m.amount]);
     if (!date || amount == null || amount === 0) continue;
-    const concept = String(row[m.concept] ?? '').trim(); const detail = m.detail >= 0 ? String(row[m.detail] ?? '').trim() : '';
+    const concept = String(row[m.concept] ?? '').trim();
+    const detail = [m.detail, m.obs].filter(k => k != null && k >= 0).map(k => String(row[k] ?? '').trim()).filter(Boolean).join(' · ');
     const bal = m.balance >= 0 ? parseNumES(row[m.balance]) : null;
     let base = `${date}|${amount.toFixed(2)}|${normTxt(concept)}|${normTxt(detail)}|${bal == null ? '' : bal.toFixed(2)}`;
     seen[base] = (seen[base] || 0) + 1; const id = base + '#' + seen[base];
@@ -1931,6 +1941,7 @@ function previewImport() {
       <label class="field"><span>Importe</span><div class="inp"><select data-imp="amount">${colOpts(map.amount)}</select></div></label>
       <label class="field"><span>Concepto</span><div class="inp"><select data-imp="concept">${colOpts(map.concept)}</select></div></label>
       <label class="field"><span>Detalle (opcional)</span><div class="inp"><select data-imp="detail">${colOpts(map.detail)}</select></div></label>
+      <label class="field"><span>Observaciones (opcional)</span><div class="inp"><select data-imp="obs">${colOpts(map.obs ?? -1)}</select></div></label>
     </div>
     ${prev.length ? `<h3 style="margin:8px 0 4px">Así se leen los primeros</h3>
     <table class="pv"><tbody>${prev.map(t => `<tr><td>${dateFmt(t.date)}</td><td>${CATS[autoCat(t)].em} ${esc(t.concept)}</td><td class="n ${t.amount < 0 ? 'down' : 'up'}">${eur(t.amount, 2)}</td></tr>`).join('')}</tbody></table>` : ''}
