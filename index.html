@@ -612,7 +612,7 @@ const txtField = (label, id, val, type = 'text', extra = '') => {
 };
 
 /* ---------- vistas ---------- */
-let tab = (() => { try { return localStorage.getItem(TAB_KEY) || 'resumen'; } catch (e) { return 'resumen'; } })();
+let tab = (() => { const q = new URLSearchParams(location.search).get('tab'); if (q) return q; try { return localStorage.getItem(TAB_KEY) || 'resumen'; } catch (e) { return 'resumen'; } })();
 let refresh = null;
 
 function fundDrawdown(isin, at) {
@@ -1585,6 +1585,77 @@ function initReparto() {
 }
 let afterRender = null;
 
+/* ---------- notificaciones push ---------- */
+const PUSH_KEY = 'patrimonio.push';
+const getPush = () => { try { return JSON.parse(localStorage.getItem(PUSH_KEY)) || null; } catch (e) { return null; } };
+const setPush = v => { try { v ? localStorage.setItem(PUSH_KEY, JSON.stringify(v)) : localStorage.removeItem(PUSH_KEY); } catch (e) {} };
+const NOTIF_EVENTS = {
+  payday: {l:'🗓️ Día de cobro', d:'Recordatorio de la revisión del mes y de importar el extracto'},
+  drop:   {l:'🌧️ Caídas del mercado', d:'Cuando tu fondo baje un 5 %, 10 % o 20 % desde su máximo'},
+  ath:    {l:'🎉 Nuevos máximos', d:'Cuando tu fondo marque un máximo (como mucho una vez por semana)'},
+  ipc:    {l:'🎈 Dato del IPC', d:'Cuando el INE publique la inflación del mes'},
+  renta:  {l:'🧾 Renta', d:'En enero, pedir certificados; en abril, revisar el borrador'}
+};
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64uStr = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+function notifPrefs() { S.ui.notif ||= {payday: true, drop: true, ath: true, ipc: true, renta: true}; return S.ui.notif; }
+function pushCode() {
+  const P = getPush(); if (!P?.sub) return '';
+  const prefs = notifPrefs();
+  const cfg = {v: 1, k: P.d, s: P.sub, p: Math.round(fin(+S.plan.payday) || 28), e: Object.keys(NOTIF_EVENTS).filter(k => prefs[k]),
+    f: S.accounts.filter(a => a.isin && a.type === 'indexado').map(a => a.isin), n: S.ui.name || ''};
+  return 'PATRI1.' + b64uStr(JSON.stringify(cfg));
+}
+async function enablePush() {
+  const err = m => { const e = document.getElementById('nt-err'); if (e) e.textContent = m; };
+  try {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') { err('No has dado permiso. Puedes activarlo en Ajustes del iPhone → Notificaciones → Patrimonio.'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    let P = getPush();
+    if (!P?.pub || !P?.d) {
+      const kp = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, true, ['sign', 'verify']);
+      const pub = await crypto.subtle.exportKey('raw', kp.publicKey);
+      const jwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+      P = {pub: b64u(pub), d: jwk.d};
+    }
+    const old = await reg.pushManager.getSubscription();
+    if (old) await old.unsubscribe();
+    const sub = await reg.pushManager.subscribe({userVisibleOnly: true, applicationServerKey: unb64(P.pub)});
+    P.sub = sub.toJSON(); P.at = todayISO();
+    setPush(P); notifForm();
+  } catch (e) { err('No se pudo activar: ' + (e.message || e)); }
+}
+function notifForm(copied) {
+  const P = getPush(); const prefs = notifPrefs();
+  let body;
+  if (!pushSupported()) body = `<div class="alert warn"><span class="ic">📵</span><div class="bd">Este navegador no admite notificaciones. En el iPhone necesitas iOS 16.4 o posterior y abrir Patrimonio desde su icono de la pantalla de inicio.</div></div>`;
+  else if (!isStandalone() && /iPhone|iPad/.test(navigator.userAgent)) body = `<div class="alert warn"><span class="ic">📲</span><div class="bd">Abre Patrimonio <b>desde su icono de la pantalla de inicio</b> (no desde Safari) y vuelve aquí. El iPhone solo permite notificaciones a las apps instaladas.</div></div>`;
+  else if (!P?.sub) body = `<p class="help">Recibirás avisos aunque la app esté cerrada. Los envía cada día la misma tarea de GitHub que actualiza los precios.</p>
+    <button class="btn block" data-action="notif-on">🔔 Activar notificaciones</button><p class="small" id="nt-err" style="color:var(--bad)"></p>`;
+  else {
+    const code = pushCode();
+    body = `<div class="alert info"><span class="ic">✅</span><div class="bd">Notificaciones activadas en este iPhone. Falta un paso (solo la primera vez): darle a GitHub tu código.</div></div>
+    <h3 style="margin:12px 0 4px">Último paso: pega tu código en GitHub</h3>
+    <ol class="small" style="padding-left:18px;margin:4px 0 8px">
+      <li>Pulsa <b>Copiar código</b>.</li>
+      <li>Pulsa <b>Abrir GitHub</b> (se abre la página para crear un secreto).</li>
+      <li>En <b>Name</b> escribe <code>PUSH_CONFIG</code>, en <b>Secret</b> pega el código y pulsa <b>Add secret</b>.</li>
+      <li>Dime "ya está" y te mando una notificación de prueba.</li>
+    </ol>
+    <div class="btnrow"><button class="btn" data-action="notif-copy">${copied ? '✅ Copiado' : '📋 Copiar código'}</button><a class="btn ghost" style="text-align:center;text-decoration:none" href="https://github.com/agusmltkd/Patrimonio/settings/secrets/actions/new" target="_blank" rel="noopener">Abrir GitHub ↗</a></div>
+    <textarea readonly style="width:100%;margin-top:8px;font:11px ui-monospace,monospace;height:64px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--muted);padding:8px" id="nt-code">${esc(code)}</textarea>
+    <p class="note">El código es privado: permite enviar notificaciones a este iPhone. Guárdalo solo como secreto en GitHub. Si cambias los avisos de abajo o el día de cobro, copia el código otra vez y actualiza el secreto (editar → pegar → guardar).</p>
+    <h3 style="margin:14px 0 4px">Qué quieres que te avise</h3>
+    ${Object.entries(NOTIF_EVENTS).map(([k, v]) => `<label class="toggle"><input type="checkbox" data-notif="${k}" ${prefs[k] ? 'checked' : ''}><span class="sw"></span><span class="tl">${v.l}<small>${v.d}${k === 'payday' ? ` · día ${Math.round(fin(+S.plan.payday) || 28)} (se cambia en Plan)` : ''}</small></span></label>`).join('')}
+    <div class="btnrow"><button class="btn ghost" data-action="notif-local">Probar en este iPhone</button><button class="btn danger" data-action="notif-off">Desactivar</button></div>`;
+  }
+  openModal(`<h2>🔔 Notificaciones</h2>${body}<div class="btnrow"><button class="btn ghost block" data-action="settings">Volver a ajustes</button></div>`);
+  document.querySelectorAll('[data-notif]').forEach(el => el.addEventListener('change', () => { notifPrefs()[el.dataset.notif] = el.checked; save(); const c = document.getElementById('nt-code'); if (c) c.value = pushCode(); }));
+}
+
 /* ---------- bloqueo con Face ID / PIN ---------- */
 const LOCK_KEY = 'patrimonio.lock';
 const getLock = () => { try { return JSON.parse(localStorage.getItem(LOCK_KEY)) || null; } catch (e) { return null; } };
@@ -2306,6 +2377,7 @@ function settingsForm() {
     ${txtField('Tu nombre (para el saludo)', 's-name', S.ui.name)}
     <label class="field"><span>Tema</span><div class="inp"><select id="s-theme">${opts({'':'Automático', light:'Claro', dark:'Oscuro'}, theme)}</select></div></label>
     <div class="btnrow"><button class="btn ghost block" data-action="lock">🔒 Bloqueo con Face ID${getLock() ? ' · activado' : ''}</button></div>
+    <div class="btnrow"><button class="btn ghost block" data-action="notif">🔔 Notificaciones${getPush() ? ' · activadas' : ''}</button></div>
     <h3 style="margin-top:14px">Copia de seguridad</h3>
     <p class="small muted" style="margin-top:0">Los datos se guardan solo en este dispositivo (clave <code>${KEY}</code>), así que el Hub puede copiarlos junto a tus otras PWAs.</p>
     <div class="btnrow"><button class="btn" data-action="export">Exportar JSON</button><button class="btn ghost" data-action="import">Importar JSON</button></div>
@@ -2340,6 +2412,11 @@ document.addEventListener('click', e => {
     case 'sp-years': S.plan.spYears = +el.dataset.v; save(); if (refresh) refresh(); break;
     case 'report': if (el.dataset.v) reportForm(el.dataset.v); break;
     case 'lock': lockForm(); break;
+    case 'notif': notifForm(); break;
+    case 'notif-on': enablePush(); break;
+    case 'notif-copy': { const c = pushCode(); (navigator.clipboard?.writeText(c) || Promise.reject()).then(() => notifForm(true)).catch(() => { const t = document.getElementById('nt-code'); t.select(); document.execCommand('copy'); notifForm(true); }); break; }
+    case 'notif-local': navigator.serviceWorker.ready.then(r => r.showNotification('🔔 Prueba de Patrimonio', {body: 'Así se verán tus avisos.', icon: 'icon-192.png', tag: 'test'})); break;
+    case 'notif-off': if (confirm('¿Desactivar las notificaciones en este iPhone?')) { navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => s && s.unsubscribe()).finally(() => { setPush(null); notifForm(); }); } break;
     case 'lock-on': lockOn(); break;
     case 'lock-off': if (confirm('¿Desactivar el bloqueo?')) { setLock(null); lockForm(); } break;
     case 'lock-test': lockNow(); tryBio(); break;
@@ -2527,6 +2604,11 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); });
+  navigator.serviceWorker.addEventListener('message', ev => {
+    if (ev.data?.type !== 'open') return;
+    const t = new URL(ev.data.url).searchParams.get('tab');
+    if (t && VIEWS[t]) { tab = t; try { localStorage.setItem(TAB_KEY, tab); } catch (e) {} closeModal(); render(); window.scrollTo(0, 0); }
+  });
 }
 })();
 </script>

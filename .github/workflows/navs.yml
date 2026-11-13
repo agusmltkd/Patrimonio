@@ -2,9 +2,14 @@ name: Actualizar valores liquidativos e IPC
 
 on:
   schedule:
-    - cron: "37 6 * * 1-6"   # por la mañana (hora UTC), recoge el precio del día anterior
+    - cron: "37 6 * * *"     # por la mañana (hora UTC), recoge el precio del día anterior y envía avisos
     - cron: "47 19 * * 1-5"  # por la tarde, por si ya se ha publicado el del día
   workflow_dispatch:          # botón "Run workflow" para lanzarlo a mano
+    inputs:
+      prueba:
+        description: "Enviar una notificación de prueba"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -30,9 +35,19 @@ jobs:
         run: python scripts/update_ipc.py
         continue-on-error: true
 
+      - name: Enviar notificaciones
+        env:
+          PUSH_CONFIG: ${{ secrets.PUSH_CONFIG }}
+          PUSH_TEST: ${{ inputs.prueba }}
+        run: |
+          if [ -z "$PUSH_CONFIG" ]; then echo "Sin PUSH_CONFIG"; exit 0; fi
+          pip install --quiet pywebpush
+          python scripts/notify.py
+        continue-on-error: true
+
       - name: Guardar cambios
         run: |
-          git add navs.json ipc.json 2>/dev/null || git add navs.json
+          for f in navs.json ipc.json notify-state.json; do [ -f "$f" ] && git add "$f"; done
           if git diff --cached --quiet; then
             echo "Sin datos nuevos"
             exit 0
