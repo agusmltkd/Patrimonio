@@ -237,6 +237,20 @@ body.locked main,body.locked header.top,body.locked nav.tabs,body.locked #modal{
 .sankey{width:100%;height:auto;display:block;overflow:visible}
 .sankey text{font-size:11px;fill:var(--text)}
 .sankey .amt{font-weight:700;font-variant-numeric:tabular-nums}
+.achs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px}
+.ach{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;border:0;background:none;font:inherit;color:inherit;cursor:pointer;padding:0}
+.ach .md{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-size:26px;background:radial-gradient(circle at 35% 30%, #fff8d6, #f5c542 55%, #c98a0b);box-shadow:0 3px 10px rgba(201,138,11,.35), inset 0 -3px 6px rgba(0,0,0,.15);position:relative}
+.ach.off .md{background:var(--line);box-shadow:none;filter:grayscale(1);opacity:.55}
+.ach .md .lk{position:absolute;right:-2px;bottom:-2px;font-size:14px;background:var(--card);border-radius:50%;width:22px;height:22px;display:grid;place-items:center;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.ach .an{font-size:11.5px;line-height:1.2;color:var(--text)}
+.ach.off .an{color:var(--muted)}
+.newach{background:linear-gradient(135deg,#fff3c4,#ffd86b);color:#3b2a00;border:0}
+:root[data-theme="dark"] .newach{background:linear-gradient(135deg,#5a4500,#8a6a00);color:#fff4cc}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .newach{background:linear-gradient(135deg,#5a4500,#8a6a00);color:#fff4cc}}
+.newach .md{animation:pop .6s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes pop{from{transform:scale(.3);opacity:0}to{transform:scale(1);opacity:1}}
+.dd-meter{position:relative;height:10px;border-radius:99px;background:linear-gradient(90deg,var(--ok),#e5b400 35%,var(--warn) 60%,var(--bad));margin:10px 0 4px}
+.dd-meter b{position:absolute;top:-4px;width:4px;height:18px;border-radius:2px;background:var(--text);transform:translateX(-2px)}
 .disclaimer{font-size:12px;color:var(--muted);text-align:center;margin:16px 4px 0}
 .split{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
 </style>
@@ -339,6 +353,7 @@ function defaults() {
     house: {price:180000, downPct:20, young:true, itpYoung:3.5, itpGeneral:7, otherCosts:3000, furnish:3000, mortgageRate:3, years:30},
     ui: {name:'Agustín', welcomeDone:false},
     tax: {retains:{}, interest:{}},
+    ach: {},
     snapshots: [],
     projects: [
       'Software para casetas y hermandades',
@@ -370,6 +385,7 @@ function normalize(s) {
   out.house = Object.assign({}, d.house, s.house || {});
   out.ui = Object.assign({}, d.ui, s.ui || {});
   out.tax = Object.assign({retains:{}, interest:{}}, s.tax || {});
+  out.ach = (s.ach && typeof s.ach === 'object') ? s.ach : {};
   for (const k of ['snapshots','projects','income','checklist']) if (!Array.isArray(out[k])) out[k] = [];
   out.accounts = out.accounts.map(a => ({
     id: a.id || uid(), name: a.name || 'Cuenta', entity: a.entity || '', type: TYPES[a.type] ? a.type : 'otro',
@@ -584,8 +600,140 @@ const txtField = (label, id, val, type = 'text', extra = '') => {
 let tab = (() => { try { return localStorage.getItem(TAB_KEY) || 'resumen'; } catch (e) { return 'resumen'; } })();
 let refresh = null;
 
+function fundDrawdown(isin, at) {
+  // Caída desde el máximo de los 12 meses anteriores a 'at' (o hoy)
+  const h = fundHist(isin); if (h.length < 20) return null;
+  const end = at || h[h.length - 1][0];
+  const d0 = new Date(end + 'T12:00:00'); d0.setFullYear(d0.getFullYear() - 1);
+  const from = `${d0.getFullYear()}-${pad(d0.getMonth()+1)}-${pad(d0.getDate())}`;
+  const win = h.filter(([d]) => d >= from && d <= end); if (!win.length) return null;
+  let peak = win[0]; for (const r of win) if (r[1] >= peak[1]) peak = r;
+  const last = win[win.length - 1];
+  const m1 = new Date(end + 'T12:00:00'); m1.setMonth(m1.getMonth() - 1);
+  const m1iso = `${m1.getFullYear()}-${pad(m1.getMonth()+1)}-${pad(m1.getDate())}`;
+  const monthAgo = navAt(isin, m1iso);
+  return {dd: (last[1] / peak[1] - 1) * 100, peak, last, month: monthAgo ? (last[1] / monthAgo[1] - 1) * 100 : null};
+}
+function dropInfo() {
+  const inv = S.accounts.filter(a => a.type === 'indexado' && a.isin && fundHist(a.isin).length);
+  if (!inv.length) return null;
+  const a = inv.sort((x, y) => y.balance - x.balance)[0];
+  const d = fundDrawdown(a.isin); if (!d) return null;
+  return {a, ...d};
+}
+function dropAlert() {
+  const x = dropInfo(); if (!x || x.dd > -5) return null;
+  const dd = -x.dd, a = x.a;
+  const lvl = dd >= 20 ? {ic:'🐻', t:'bad', title:`Tu ${a.name} está un ${pct(dd, 0)} por debajo de su máximo`, txt:'Es lo que se llama un mercado bajista. Ha pasado varias veces en la historia del S&P 500 (2008, 2020, 2022) y siempre ha terminado recuperándose, aunque a veces ha tardado años.'}
+    : dd >= 10 ? {ic:'🌧️', t:'warn', title:`Tu ${a.name} ha caído un ${pct(dd, 0)} desde su máximo`, txt:'Es una corrección: pasa, de media, una vez cada uno o dos años. Asusta, pero es parte normal de invertir.'}
+    : {ic:'🌤️', t:'info', title:`Tu ${a.name} está un ${pct(dd, 0)} por debajo de su máximo`, txt:'Es una bajada pequeña y muy habitual. No hace falta hacer nada.'};
+  const sp = fin(+S.plan.spMonthly);
+  const extraU = sp && x.peak[1] ? sp / x.last[1] - sp / x.peak[1] : 0;
+  const lost = a.units > 0 ? a.units * (x.peak[1] - x.last[1]) : 0;
+  return {t: lvl.t, ic: lvl.ic, h: `<b>${lvl.title}.</b> ${lvl.txt}${lost >= 1 ? ` Sobre el papel, ahora vale ${eur(lost)} menos que en su mejor momento (${dateFmt(x.peak[0])}); no pierdes nada mientras no vendas.` : ''} ${sp ? `<br>💡 <b>Lo mejor suele ser seguir igual:</b> tus ${eur(sp)} de este mes compran un ${pct(dd / (100 - dd) * 100, 0)} más de participaciones que en el máximo${extraU > 0 ? ` (${extraU.toLocaleString('es-ES', {maximumFractionDigits:2})} más)` : ''}. Comprar barato es lo que luego hace ganar.` : ''}`, btn: ['Ver la caída', 'drop']};
+}
+function dropForm() {
+  const x = dropInfo(); if (!x) return;
+  const dd = Math.max(0, -x.dd);
+  const h = fundHist(x.a.isin); const from = new Date(); from.setFullYear(from.getFullYear() - 1);
+  const fISO = `${from.getFullYear()}-${pad(from.getMonth()+1)}-${pad(from.getDate())}`;
+  let pts = h.filter(([d]) => d >= fISO); const st = Math.max(1, Math.floor(pts.length / 90)); pts = pts.filter((_, i) => i % st === 0 || i === pts.length - 1);
+  openModal(`<h2>${dd >= 20 ? '🐻' : dd >= 10 ? '🌧️' : '🌤️'} ¿Cómo va el mercado?</h2>
+    <p class="small muted" style="margin:0">${esc(x.a.name)}, desde su máximo del último año</p>
+    <div class="delta-big num ${dd >= 5 ? 'down' : 'up'}">${dd < 0.5 ? 'En máximos 🎉' : '−' + pct(dd)}</div>
+    <div class="dd-meter"><b style="left:${Math.min(100, dd / 30 * 100)}%"></b></div>
+    <div class="row small muted"><span>0 %</span><span>−10 %</span><span>−20 %</span><span>−30 %</span></div>
+    ${lineChart({labels: pts.map(([d]) => new Date(d + 'T12:00:00').toLocaleDateString('es-ES', {month:'short', year:'2-digit'}).replace('.', '')), series: [{name:'Precio del fondo', color:'var(--b-largo)', values: pts.map(p => p[1])}], hline: {value: x.peak[1], label: 'Máximo'}, height: 170, zero: false})}
+    ${x.month != null ? `<p class="small">Último mes: <b class="${x.month >= 0 ? 'up' : 'down'}">${x.month >= 0 ? '+' : ''}${pct(x.month)}</b></p>` : ''}
+    <h3 style="margin:14px 0 4px">Qué suele pasar</h3>
+    <div class="rows small">
+      <div class="row"><span>🌤️ Bajadas del 5 %</span><span class="muted">varias veces al año</span></div>
+      <div class="row"><span>🌧️ Correcciones del 10 %</span><span class="muted">cada 1–2 años</span></div>
+      <div class="row"><span>🐻 Caídas del 20 % o más</span><span class="muted">cada pocos años</span></div>
+    </div>
+    <p class="help" style="margin-top:10px">El error más caro suele ser vender en plena caída por miedo y perderse la recuperación. Si el dinero es de largo plazo (10 años o más), lo habitual es seguir aportando igual. Si vas a necesitarlo pronto (por ejemplo, para la casa), no debería estar aquí.</p>
+    <p class="note">Información general, no asesoramiento. La rentabilidad pasada no garantiza la futura.</p>
+    <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
+
+/* ---------- logros ---------- */
+function monthStreak() {
+  const ms = [...new Set(sortedSnaps().map(x => x.date.slice(0, 7)))].sort();
+  let best = 0, cur = 0, prev = null;
+  for (const m of ms) {
+    if (prev) { const [y, mm] = prev.split('-').map(Number); const nx = mm === 12 ? `${y + 1}-01` : `${y}-${pad(mm + 1)}`; cur = m === nx ? cur + 1 : 1; } else cur = 1;
+    best = Math.max(best, cur); prev = m;
+  }
+  return best;
+}
+function achList() {
+  const b = sums(); const total = BK.reduce((s, k) => s + b[k], 0);
+  const need = houseNeed().total; const casaP = need ? b.casa / need * 100 : 0;
+  const reps = reportKeys().map(k => buildReport(k)).filter(r => r && r.pay.count);
+  const nom = fin(+S.plan.salary);
+  let underStreak = 0, bestUnder = 0; for (const r of reps) { if (r.spent >= 0 && r.spent <= r.planned) { underStreak++; bestUnder = Math.max(bestUnder, underStreak); } else underStreak = 0; }
+  const saver = reps.some(r => r.pay.count === 1 && r.saved >= nom * 0.7);
+  const inv = S.accounts.filter(a => a.type === 'indexado'); const invBal = inv.reduce((s, a) => s + a.balance, 0);
+  const lots = inv.flatMap(a => (a.lots || []).map(l => ({...l, a})));
+  const braveLot = lots.some(l => { const d = fundDrawdown(l.a.isin, l.date); return d && d.dd <= -10; });
+  const gainP = inv.reduce((s, a) => s + (a.invested ? a.balance - a.invested : 0), 0) / (inv.reduce((s, a) => s + (a.invested || 0), 0) || 1) * 100;
+  const extraTot = S.income.reduce((s, i) => s + fin(i.amount), 0);
+  const streak = monthStreak();
+  const L = [];
+  const add = (id, em, name, ok, hint, prog) => L.push({id, em, name, ok: !!ok, hint, prog});
+  add('rev1', '🗓️', 'Primera revisión', sortedSnaps().length >= 1, 'Haz tu primera revisión de saldos', null);
+  add('rev3', '🔁', '3 meses seguidos', streak >= 3, 'Haz la revisión 3 meses seguidos', Math.min(1, streak / 3));
+  add('rev6', '📆', '6 meses seguidos', streak >= 6, 'Haz la revisión 6 meses seguidos', Math.min(1, streak / 6));
+  add('rev12', '🏅', 'Un año entero', streak >= 12, 'Haz la revisión 12 meses seguidos', Math.min(1, streak / 12));
+  for (const t of [10000, 20000, 30000, 50000, 75000, 100000]) add('pat' + t, t >= 50000 ? '💎' : '💰', `${compact(t)} €`, total >= t, `Llega a ${eur(t)} de patrimonio`, Math.min(1, total / t));
+  for (const q of [25, 50, 75, 100]) add('casa' + q, q === 100 ? '🔑' : '🏠', q === 100 ? '¡Casa lista!' : `Casa al ${q} %`, casaP >= q, `Junta el ${q} % de lo que necesitas para la casa`, Math.min(1, casaP / q));
+  add('colchon', '🛟', 'Colchón completo', b.emergencia >= fin(+S.plan.emergencyTarget) && b.emergencia > 0, `Junta ${eur(S.plan.emergencyTarget)} de colchón de emergencias`, Math.min(1, b.emergencia / (fin(+S.plan.emergencyTarget) || 1)));
+  add('nopar', '🧹', 'Nada parado', b.operativo > 0 && b.operativo <= fin(+S.plan.operatingTarget) * 1.2, 'Deja en el día a día solo lo que necesitas', null);
+  add('ahorro70', '🚀', 'Súper ahorrador', saver, 'Ahorra un mes el 70 % de tu nómina', null);
+  add('gasto3', '🧘', 'Gasto a raya', bestUnder >= 3, 'Gasta menos de lo previsto 3 meses seguidos', Math.min(1, bestUnder / 3));
+  add('inv10', '📈', '10.000 € invertidos', invBal >= 10000, 'Llega a 10.000 € en inversión', Math.min(1, invBal / 10000));
+  add('inv25', '🌳', '25.000 € invertidos', invBal >= 25000, 'Llega a 25.000 € en inversión', Math.min(1, invBal / 25000));
+  add('gain10', '✨', '+10 % de ganancia', gainP >= 10, 'Consigue un 10 % de ganancia en tus fondos', Math.max(0, Math.min(1, gainP / 10)));
+  add('brave', '🦁', 'Valiente', braveLot, 'Sigue aportando cuando el mercado haya caído un 10 %', null);
+  add('extra1', '⚡', 'Primer euro extra', extraTot > 0, 'Registra tu primer ingreso extra', null);
+  add('extra1k', '🔥', '1.000 € extra', extraTot >= 1000, 'Gana 1.000 € con proyectos extra', Math.min(1, extraTot / 1000));
+  return L;
+}
+function checkAch() {
+  const L = achList(); const t = todayISO(); const fresh = [];
+  for (const a of L) if (a.ok && !S.ach[a.id]) { S.ach[a.id] = t; fresh.push(a.id); }
+  if (fresh.length) { S.ui.newAch = [...new Set([...(S.ui.newAch || []), ...fresh])]; save(); }
+  return L;
+}
+function achCard() {
+  const L = checkAch(); const got = L.filter(a => a.ok);
+  const nxt = L.filter(a => !a.ok && a.prog != null).sort((x, y) => y.prog - x.prog)[0];
+  const fresh = (S.ui.newAch || []).map(id => L.find(a => a.id === id)).filter(Boolean);
+  const banner = fresh.length ? `<section class="card newach">
+    <div style="display:flex;gap:14px;align-items:center">
+      <div class="ach"><div class="md">${fresh[0].em}</div></div>
+      <div style="flex:1"><b style="font-size:17px">${fresh.length > 1 ? `¡${fresh.length} logros nuevos!` : '¡Nuevo logro!'}</b><div>${fresh.map(a => esc(a.name)).join(' · ')}</div></div>
+    </div>
+    <button class="btn block" style="margin-top:12px;background:#3b2a00;color:#ffe9a8" data-action="ach-ok">¡Genial! 🎉</button>
+  </section>` : '';
+  return `${banner}<section class="card">
+    <div class="bucket-h"><h2 style="margin:0"><span class="em">🏆</span>Logros</h2><span class="muted small">${got.length} de ${L.length}</span></div>
+    ${nxt ? `<p class="small" style="margin:10px 0 4px">Próximo: <b>${esc(nxt.name)}</b> · ${esc(nxt.hint)}</p><div class="progress" style="margin:4px 0 2px"><i style="width:${nxt.prog * 100}%;background:linear-gradient(90deg,#f5c542,#c98a0b)"></i></div>` : ''}
+    <div class="achs">${[...got.sort((x, y) => (S.ach[y.id] || '').localeCompare(S.ach[x.id] || '')), ...L.filter(a => !a.ok)].slice(0, 8).map(a => `<button class="ach ${a.ok ? '' : 'off'}" data-action="ach-info" data-v="${a.id}"><div class="md">${a.em}${a.ok ? '' : '<span class="lk">🔒</span>'}</div><span class="an">${esc(a.name)}</span></button>`).join('')}</div>
+    <button class="btn ghost block" style="margin-top:12px" data-action="ach-all">Ver todos los logros</button>
+  </section>`;
+}
+function achAll() {
+  const L = checkAch();
+  openModal(`<h2>🏆 Tus logros</h2>
+    <p class="help">${L.filter(a => a.ok).length} de ${L.length} conseguidos. Toca uno para ver qué hace falta.</p>
+    <div class="achs">${L.map(a => `<button class="ach ${a.ok ? '' : 'off'}" data-action="ach-info" data-v="${a.id}"><div class="md">${a.em}${a.ok ? '' : '<span class="lk">🔒</span>'}</div><span class="an">${esc(a.name)}</span></button>`).join('')}</div>
+    <p class="help" id="ach-detail" style="margin-top:14px;min-height:36px"></p>
+    <div class="btnrow"><button class="btn ghost block" data-action="close">Cerrar</button></div>`);
+}
 function buildAlerts(b, sim) {
   const out = [], p = S.plan, need = sim.need;
+  const drop = dropAlert(); if (drop) out.push(drop);
   const idle = b.operativo - p.operatingTarget;
   const last = sortedSnaps().pop();
   if (!last || last.date.slice(0, 7) !== todayISO().slice(0, 7)) {
@@ -987,6 +1135,7 @@ function viewResumen() {
     ${ipcYoy() ? (() => { const inf = ipcYoy()[1]; const lost = total * inf / 100; const net = safe + expRet - lost; return `<div class="row small" style="margin-top:10px"><span class="muted">🎈 La inflación (${pct(inf)}) le resta a tu dinero</span><b class="num down">−${eur(lost)}</b></div><div class="row small"><span class="muted">Lo que ganas de verdad, descontando la inflación</span><b class="num ${net >= 0 ? 'up' : 'down'}">${net >= 0 ? '+' : ''}${eur(net)}</b></div>`; })() : ''}
   </section>
   ${reportCard()}
+  ${achCard()}
   <section class="card"><h2><span class="em">📊</span>Cómo ha evolucionado</h2>${hist}</section>
   <section class="card">
     <h2><span class="em">🧰</span>Herramientas</h2>
@@ -1825,6 +1974,15 @@ document.addEventListener('click', e => {
     case 'map-by': S.ui.mapBy = el.dataset.v; mapSel = -1; commit(); break;
     case 'seg': selectSeg(+el.dataset.v); break;
     case 'goto-card': { const c = document.getElementById('card-' + id); const box = $('#carousel'); if (c && box) { box.scrollTo({left: c.offsetLeft - box.offsetLeft - (box.clientWidth - c.clientWidth) / 2, behavior: 'smooth'}); c.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } break; }
+    case 'drop': dropForm(); break;
+    case 'ach-ok': S.ui.newAch = []; commit(); break;
+    case 'ach-all': achAll(); break;
+    case 'ach-info': {
+      const a = achList().find(x => x.id === el.dataset.v); if (!a) break;
+      const txt = a.ok ? `✅ <b>${esc(a.name)}</b> · conseguido el ${dateFmt(S.ach[a.id] || todayISO())}` : `🔒 <b>${esc(a.name)}</b> · ${esc(a.hint)}${a.prog != null ? ` (llevas un ${pct(a.prog * 100, 0)})` : ''}`;
+      const d = document.getElementById('ach-detail'); if (d) d.innerHTML = txt; else { achAll(); document.getElementById('ach-detail').innerHTML = txt; }
+      break;
+    }
     case 'goto': tab = el.dataset.v; try { localStorage.setItem(TAB_KEY, tab); } catch (er) {} render(); window.scrollTo(0, 0); break;
     case 'show-welcome': S.ui.welcomeDone = false; tab = 'resumen'; closeModal(); commit(); break;
     case 'welcome-ok': S.ui.welcomeDone = true; commit(); break;
