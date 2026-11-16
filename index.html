@@ -293,6 +293,7 @@ body.locked main,body.locked header.top,body.locked nav.tabs,body.locked #modal{
   <div class="err" id="lock-err"></div>
 </div>
 <input type="file" id="importFile" accept="application/json,.json" hidden>
+<input type="file" id="ordFile" accept=".csv,.txt,.xlsx,.xls,text/csv" hidden>
 <input type="file" id="txFile" accept=".xlsx,.xls,.csv,.txt,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" hidden>
 
 <script>
@@ -1178,6 +1179,109 @@ function fifoCost(a, units, date) {
   }
   return cost;
 }
+/* ---------- importar órdenes de MyInvestor ---------- */
+function parseUnits(v) {
+  // Participaciones: "30,011" (coma decimal), "1.234,5678" o número
+  if (typeof v === 'number') return v;
+  let t = String(v ?? '').replace(/[\s ]/g, '');
+  if (!t) return null;
+  if (t.includes(',') && t.includes('.')) t = t.lastIndexOf(',') > t.lastIndexOf('.') ? t.replace(/\./g, '').replace(',', '.') : t.replace(/,/g, '');
+  else if (t.includes(',')) t = t.replace(',', '.');
+  const n = parseFloat(t); return isFinite(n) ? n : null;
+}
+function parseOrders(rows) {
+  let h = -1, col = {};
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const c = rows[r].map(x => normTxt(x));
+    if (c.some(x => /ISIN/.test(x)) && c.some(x => /PARTICIPACION/.test(x))) {
+      h = r;
+      col = {date: c.findIndex(x => /FECHA/.test(x)), isin: c.findIndex(x => /ISIN/.test(x)), amount: c.findIndex(x => /IMPORTE/.test(x)),
+             units: c.findIndex(x => /PARTICIPACION/.test(x)), status: c.findIndex(x => /ESTADO/.test(x)), type: c.findIndex(x => /TIPO|OPERACION|SENTIDO/.test(x))};
+      break;
+    }
+  }
+  if (h < 0) return null;
+  const out = [];
+  for (let r = h + 1; r < rows.length; r++) {
+    const row = rows[r]; if (!row || !row.length) continue;
+    const date = parseDateAny(row[col.date]); const isin = String(row[col.isin] ?? '').trim().toUpperCase();
+    const amount = parseNumES(row[col.amount]); const units = parseUnits(row[col.units]);
+    const status = col.status >= 0 ? normTxt(row[col.status]) : '';
+    const type = col.type >= 0 ? normTxt(row[col.type]) : '';
+    if (!date || !/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(isin) || !amount || !units) continue;
+    if (status && !/FINALIZ|EJECUT|LIQUID|COMPLET/.test(status)) continue;
+    const sell = /REEMBOLSO|VENTA|TRASPASO SALIDA|SALIDA/.test(type);
+    out.push({date, isin, amount: Math.abs(amount), units: Math.abs(units), sell});
+  }
+  return out;
+}
+let pendingOrders = null;
+async function importOrdersFile(file) {
+  try {
+    const rows = await readRows(file);
+    const orders = parseOrders(rows);
+    if (!orders) { alert('No reconozco este archivo. Tiene que ser el CSV de órdenes de MyInvestor (con columnas ISIN y Nº de participaciones).'); return; }
+    pendingOrders = orders; previewOrders();
+  } catch (e) { alert('No he podido leer el archivo: ' + e.message); }
+}
+function previewOrders() {
+  const byIsin = {};
+  for (const o of pendingOrders) (byIsin[o.isin] ||= []).push(o);
+  const blocks = Object.entries(byIsin).map(([isin, list]) => {
+    const a = S.accounts.find(x => x.isin === isin);
+    const buys = list.filter(o => !o.sell), sells = list.filter(o => o.sell);
+    const units = buys.reduce((s, o) => s + o.units, 0) - sells.reduce((s, o) => s + o.units, 0);
+    const put = buys.reduce((s, o) => s + o.amount, 0);
+    const dates = list.map(o => o.date).sort();
+    const n = navOf(isin); const value = n ? units * n.nav : null;
+    const approx = a ? (a.lots || []).filter(l => !String(l.id).startsWith('mi|')).length : 0;
+    return `<div style="padding:10px 0;border-top:1px solid var(--line)">
+      <b>${a ? esc(a.name) : 'Fondo nuevo'}</b> <span class="muted small">${isin}</span>
+      <div class="small muted">${buys.length} compras${sells.length ? ` y ${sells.length} ventas` : ''} · del ${dateFmt(dates[0])} al ${dateFmt(dates[dates.length - 1])}</div>
+      <div class="kpis" style="margin-top:8px">
+        <div class="kpi"><b class="num">${eur(put, 2)}</b><span>Dinero metido</span></div>
+        <div class="kpi"><b class="num">${units.toLocaleString('es-ES', {maximumFractionDigits: 3})}</b><span>Participaciones</span></div>
+      </div>
+      ${value != null ? `<p class="small" style="margin:8px 0 0">Hoy valen unos <b>${eur(value)}</b> · ganancia <b class="${value - put >= 0 ? 'up' : 'down'}">${value - put >= 0 ? '+' : ''}${eur(value - put)} (${pct((value / put - 1) * 100)})</b></p>` : ''}
+      ${!a ? `<p class="help">No tienes este fondo en la app: se creará como cuenta nueva de inversión.</p>` : ''}
+      <label class="toggle"><input type="checkbox" data-ordset="${isin}" checked><span class="sw"></span><span class="tl">Usar estos totales como mis participaciones y dinero metido<small>Desmárcalo si este archivo no tiene todas tus órdenes desde el principio</small></span></label>
+      ${approx ? `<label class="toggle"><input type="checkbox" data-ordrep="${isin}" checked><span class="sw"></span><span class="tl">Sustituir las ${approx} compras aproximadas que apuntaste a mano</span></label>` : ''}
+    </div>`;
+  }).join('');
+  openModal(`<h2>📥 Órdenes de MyInvestor</h2>
+    <p class="help">He encontrado <b>${pendingOrders.length} órdenes</b> ya ejecutadas. Las repetidas se ignoran si vuelves a importar el archivo más adelante.</p>
+    ${blocks}
+    <div class="btnrow"><button class="btn" data-action="ord-import">Importar</button><button class="btn ghost" data-action="close">Cancelar</button></div>`);
+}
+function doImportOrders() {
+  const byIsin = {};
+  for (const o of pendingOrders) (byIsin[o.isin] ||= []).push(o);
+  let added = 0;
+  for (const [isin, list] of Object.entries(byIsin)) {
+    const setTot = document.querySelector(`[data-ordset="${isin}"]`)?.checked;
+    const rep = document.querySelector(`[data-ordrep="${isin}"]`)?.checked;
+    let a = S.accounts.find(x => x.isin === isin);
+    if (!a) { a = {id: uid(), name: 'Fondo ' + isin.slice(0, 6), entity: 'MyInvestor', type: 'indexado', bucket: 'largo', balance: 0, rate: 7, invested: null, isin, units: null, reserve: 0, lots: [], sales: []}; S.accounts.push(a); }
+    a.lots ||= []; a.sales ||= [];
+    if (rep) a.lots = a.lots.filter(l => String(l.id).startsWith('mi|'));
+    const have = new Set([...a.lots.map(l => l.id), ...a.sales.map(x => x.id)]);
+    for (const o of list) {
+      const id = `mi|${o.date}|${o.units.toFixed(4)}|${o.sell ? 'v' : 'c'}`;
+      if (have.has(id)) continue;
+      if (o.sell) a.sales.push({id, date: o.date, units: o.units, amount: o.amount, cost: null, gain: null, transfer: false});
+      else a.lots.push({id, date: o.date, amount: round2(o.amount), units: o.units});
+      have.add(id); added++;
+    }
+    if (setTot) {
+      const buys = list.filter(o => !o.sell), sells = list.filter(o => o.sell);
+      a.units = Math.round((buys.reduce((s, o) => s + o.units, 0) - sells.reduce((s, o) => s + o.units, 0)) * 10000) / 10000;
+      a.invested = round2(buys.reduce((s, o) => s + o.amount, 0) - sells.reduce((s, o) => s + (fifoCost(a, o.units, o.date) || 0), 0));
+    }
+  }
+  pendingOrders = null; applyNavs(); closeModal(); tab = 'cuentas'; commit();
+  setTimeout(() => { const f = document.querySelector('[data-action="lots"]'); f?.closest('section')?.scrollIntoView({behavior: 'smooth'}); }, 50);
+  alert(`${added} órdenes importadas.`);
+}
 function lotUnits(isin, date, amount) { const at = navAt(isin, date); return at ? Math.round(amount / at[1] * 10000) / 10000 : 0; }
 function fundPerf(a) {
   const lots = [...(a.lots || [])].sort((x, y) => x.date.localeCompare(y.date));
@@ -1247,6 +1351,8 @@ function fundsCard() {
   return `<section class="card">
     <h2><span class="em">📉</span>Tus fondos</h2>
     <p class="help">El precio (valor liquidativo) se actualiza solo cada día laborable. Los fondos publican un precio al día, con 1–2 días de retraso.${upd ? ` Última actualización: ${upd}.` : ''}</p>
+    <button class="btn block" style="margin-bottom:6px" data-action="ord-file">📥 Importar órdenes de MyInvestor</button>
+    <p class="help" style="margin:0 0 6px">En MyInvestor, en tu fondo → Órdenes → descargar (CSV). La app crea todas tus compras y calcula tus participaciones y lo invertido.</p>
     ${body}
   </section>`;
 }
@@ -2261,7 +2367,9 @@ function accForm(a) {
     </div>
     <div id="f-res-wrap" style="${a.bucket === 'emergencia' || a.isin ? 'display:none' : ''}">
       ${txtField('De este saldo, ¿cuánto es colchón de emergencias? (€)', 'f-reserve', a.reserve || '', 'number', 'placeholder="0"')}
-      <p class="help" style="margin-top:-4px">Esa parte cuenta en la hucha Emergencias y el resto en la que elijas arriba. El dinero no se mueve: es solo cómo lo cuentas. <button type="button" class="chip" data-action="res-target">Usar mi objetivo (${eur(S.plan.emergencyTarget)})</button></p>
+      <p class="help" style="margin-top:-4px">Esa parte cuenta en la hucha Emergencias y el resto en la que elijas arriba. El dinero no se mueve: es solo cómo lo cuentas. ${(() => { const other = S.accounts.filter(x => x.id !== a.id).reduce((t, x) => t + (accSplit(x).emergencia || 0), 0); const left = Math.max(0, fin(+S.plan.emergencyTarget) - other); return other > 0
+        ? `<br>En otras cuentas ya tienes ${eur(other)} de colchón. <button type="button" class="chip" data-action="res-target" data-v="${left}">Poner lo que falta (${eur(left)})</button>`
+        : `<button type="button" class="chip" data-action="res-target" data-v="${fin(+S.plan.emergencyTarget)}">Usar mi objetivo (${eur(S.plan.emergencyTarget)})</button>`; })()}</p>
     </div>
     <div class="grid2">
       ${txtField('ISIN (solo fondos)', 'f-isin', a.isin || '', 'text', 'placeholder="Ej. IE00BYX5MX67" autocapitalize="characters" spellcheck="false"')}
@@ -2295,6 +2403,9 @@ function lotsForm(a, msg) {
     ${best && worst ? `<p class="help">🏆 Tu mejor compra: la del <b>${dateFmt(best.date)}</b> (${best.gp >= 0 ? '+' : ''}${pct(best.gp)}). La que peor va: la del <b>${dateFmt(worst.date)}</b> (${worst.gp >= 0 ? '+' : ''}${pct(worst.gp)}). Las que compraste cuando el mercado estaba bajo son las que más ganan.</p>` : ''}
     ${mism > 0.01 ? `<div class="alert warn"><span class="ic">🧮</span><div class="bd">Tus compras apuntadas suman <b>${showNum(Math.round(perf.units * 100) / 100)}</b> participaciones, pero en la cuenta tienes <b>${showNum(a.units)}</b>. Puede faltar alguna compra o haber diferencias de precio. El saldo siempre usa las participaciones de la cuenta.</div></div>` : ''}
     <div style="max-height:40vh;overflow:auto;margin-bottom:12px">${list}</div>
+
+    <button class="btn block" data-action="ord-file">📥 Importar órdenes de MyInvestor (CSV)</button>
+    <p class="help" style="margin-top:4px">La forma más rápida: crea todas las compras de golpe con sus participaciones exactas.</p>
 
     <h3>Añadir una compra pasada</h3>
     <p class="help">Mira en MyInvestor tus movimientos y copia la fecha y el importe de cada compra. No cambia tus participaciones actuales: solo sirve para el gráfico.</p>
@@ -2423,7 +2534,7 @@ document.addEventListener('click', e => {
     case 'lock-test': lockNow(); tryBio(); break;
     case 'renta': rentaForm(el.dataset.v ? +el.dataset.v : null); break;
     case 'infl': inflForm(); break;
-    case 'res-target': { const f = document.getElementById('f-reserve'); if (f) f.value = showNum(S.plan.emergencyTarget); break; }
+    case 'res-target': { const f = document.getElementById('f-reserve'); if (f) f.value = showNum(+el.dataset.v || S.plan.emergencyTarget); break; }
     case 'map-by': S.ui.mapBy = el.dataset.v; mapSel = -1; commit(); break;
     case 'seg': selectSeg(+el.dataset.v); break;
     case 'goto-card': { const c = document.getElementById('card-' + id); const box = $('#carousel'); if (c && box) { box.scrollTo({left: c.offsetLeft - box.offsetLeft - (box.clientWidth - c.clientWidth) / 2, behavior: 'smooth'}); c.scrollIntoView({behavior: 'smooth', block: 'nearest'}); } break; }
@@ -2437,6 +2548,8 @@ document.addEventListener('click', e => {
       break;
     }
     case 'tx-file': $('#txFile').click(); break;
+    case 'ord-file': $('#ordFile').click(); break;
+    case 'ord-import': doImportOrders(); break;
     case 'tx-import': doImport(); break;
     case 'tx-all': allTxForm(gMonth); break;
     case 'tx-clear': if (confirm('¿Borrar todos los movimientos importados? Las categorías que has corregido se recuerdan.')) { S.tx = []; commit(); } break;
@@ -2582,6 +2695,7 @@ function onBind(e) {
 document.addEventListener('input', onBind);
 document.addEventListener('change', e => { if (e.target.type === 'checkbox' && e.target.dataset.bind) onBind(e); });
 $('#txFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) importTxFile(f); e.target.value = ''; });
+$('#ordFile').addEventListener('change', e => { const f = e.target.files[0]; if (f) importOrdersFile(f); e.target.value = ''; });
 $('#importFile').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   const rd = new FileReader();
